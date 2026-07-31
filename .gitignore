@@ -1,0 +1,13 @@
+/.env
+/config/drive_token.json
+/uploads/temp_ai/*
+!/uploads/temp_ai/.gitkeep
+/ai_service/.env
+/ai_service/__pycache__/
+/ai_service/.venv/
+/ai_service/server.log
+/ai_service/server.error.log
+/ai_service/*.log
+/ai_service/logs/*.log
+/ai_service/logs/*.jsonl
+*.pyc

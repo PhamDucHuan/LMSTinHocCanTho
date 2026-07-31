@@ -1,0 +1,24 @@
+{
+  "name": "lms-ai-service",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "7zip-bin": "^5.2.0",
+    "adm-zip": "^0.6.0",
+    "dotenv": "^16.6.1",
+    "express": "^5.1.0",
+    "image-size": "^2.0.2",
+    "mammoth": "^1.10.0",
+    "mysql2": "^3.23.2",
+    "node-unrar-js": "^2.0.2"
+  }
+}

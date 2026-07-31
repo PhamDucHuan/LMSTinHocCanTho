@@ -1,0 +1,26 @@
+Options -Indexes
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^(?:config|database|maintenance|vendor|ai_service)(?:/|$) - [F,L,NC]
+    RewriteRule ^setup_drive_token\.php$ - [L,NC]
+    RewriteRule ^(?:setup_|db_update).*\.php$ - [F,L,NC]
+    RewriteRule ^uploads/temp_ai(?:/|$) - [F,L,NC]
+    RewriteRule ^uploads/(?!quiz_images/)(?:.*)$ - [F,L,NC]
+    RewriteRule (^|/)\.(?!well-known/) - [F,L]
+</IfModule>
+
+<FilesMatch "(^\.env|drive_token\.json|composer\.(json|lock)|\.sql$|requirements\.txt$)">
+    Require all denied
+</FilesMatch>
+
+# Cho phép cấp Drive token lần đầu chỉ từ chính máy chủ.
+<Files "setup_drive_token.php">
+    Require local
+</Files>
+
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set X-Frame-Options "SAMEORIGIN"
+</IfModule>
