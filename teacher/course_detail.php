@@ -152,13 +152,13 @@ $stmt->execute([$course_id]);
 $available_students = $stmt->fetchAll();
 
 $stmt = $pdo->prepare("
-    SELECT a.id, a.title, a.type, a.due_date, a.created_at,
+    SELECT a.id, a.title, a.type, a.due_date, a.created_at, a.priority_order,
            COUNT(s.id) AS submission_count, MAX(s.submitted_at) AS latest_submission_at
     FROM assignments a
     LEFT JOIN submissions s ON s.assignment_id = a.id
     WHERE a.course_id = ?
-    GROUP BY a.id, a.title, a.type, a.due_date, a.created_at
-    ORDER BY a.created_at DESC
+    GROUP BY a.id, a.title, a.type, a.due_date, a.created_at, a.priority_order
+    ORDER BY a.priority_order, a.created_at, a.id
 ");
 $stmt->execute([$course_id]);
 $course_assignments = $stmt->fetchAll();

@@ -11,7 +11,7 @@ if (!isset($_SESSION['user_id']) || $_SESSION['user_role'] !== 'admin') {
 
 $id = $_GET['id'] ?? null;
 if (!$id) {
-    header('Location: dashboard.php');
+    header('Location: assignments.php');
     exit;
 }
 
@@ -87,7 +87,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $update->execute([$title, $description, $due_date, $category, $type, $duration_minutes, $module_settings_json, $prompt_file_drive_id, $prompt_file_name, $solution_file_drive_id, $solution_file_name, $id]);
     
     $_SESSION['success'] = "Cập nhật bài tập thành công!";
-    header('Location: dashboard.php');
+    header('Location: assignments.php');
     exit;
 }
 

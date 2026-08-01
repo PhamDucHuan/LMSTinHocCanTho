@@ -75,9 +75,11 @@ CREATE TABLE IF NOT EXISTS assignments (
     attachments JSON NULL,
     module_settings JSON NULL,
     ai_analysis JSON NULL,
+    priority_order INT UNSIGNED NOT NULL DEFAULT 0,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_assignments_course (course_id),
     INDEX idx_assignments_teacher (teacher_id),
+    INDEX idx_assignments_priority (course_id, type, priority_order),
     CONSTRAINT fk_assignments_teacher FOREIGN KEY (teacher_id) REFERENCES users(id) ON DELETE CASCADE,
     CONSTRAINT fk_assignments_course FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;

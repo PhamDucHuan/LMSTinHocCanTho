@@ -116,8 +116,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $attachments_json = !empty($attachments) ? json_encode($attachments, JSON_UNESCAPED_UNICODE) : null;
     
     if (!isset($error)) {
-        $stmt = $pdo->prepare("INSERT INTO assignments (teacher_id, title, slug, description, prompt_file_drive_id, prompt_file_name, solution_file_drive_id, solution_file_name, due_date, category, type, duration_minutes, attachments, course_id, module_settings) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-        if ($stmt->execute([$_SESSION['user_id'], $title, uniqueFriendlySlug($pdo, 'assignments', $title), $description, $prompt_file_drive_id, $prompt_file_name, $solution_file_drive_id, $solution_file_name, $due_date, $category, $type, $duration_minutes, $attachments_json, $course_id, $module_settings_json])) {
+        $priorityStmt = $pdo->prepare('SELECT COALESCE(MAX(priority_order), 0) + 1 FROM assignments WHERE course_id = ? AND type = ?');
+        $priorityStmt->execute([(int) $course_id, $type]);
+        $priorityOrder = (int) $priorityStmt->fetchColumn();
+        $stmt = $pdo->prepare("INSERT INTO assignments (teacher_id, title, slug, description, prompt_file_drive_id, prompt_file_name, solution_file_drive_id, solution_file_name, due_date, category, type, duration_minutes, attachments, course_id, module_settings, priority_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        if ($stmt->execute([$_SESSION['user_id'], $title, uniqueFriendlySlug($pdo, 'assignments', $title), $description, $prompt_file_drive_id, $prompt_file_name, $solution_file_drive_id, $solution_file_name, $due_date, $category, $type, $duration_minutes, $attachments_json, $course_id, $module_settings_json, $priorityOrder])) {
             $assignmentId = (int) $pdo->lastInsertId();
             $studentStmt = $pdo->prepare('SELECT student_id FROM course_enrollments WHERE course_id = ?');
             $studentStmt->execute([(int) $course_id]);
@@ -137,7 +140,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'type' => $type,
             ]);
             $_SESSION['success'] = 'Giao bài tập thành công!';
-            header('Location: dashboard.php');
+            header('Location: ' . ($_SESSION['user_role'] === 'admin' ? '../admin/assignments.php' : 'assignments.php'));
             exit;
         } else {
             $error = 'Có lỗi xảy ra. Vui lòng thử lại.';
@@ -305,9 +308,18 @@ require_once '../includes/header.php';
                     <small style="color:var(--text-muted);">Mặc định 90 phút. Đồng hồ bắt đầu khi học viên bấm “Bắt đầu làm bài”.</small>
                 </div>
                 
-                <div class="grid" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+                <style>
+                    .assignment-upload-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;margin-bottom:20px;align-items:start}
+                    .assignment-upload-field{display:grid;grid-template-rows:auto auto;align-content:start;min-width:0}
+                    .assignment-upload-field>label{display:flex;align-items:flex-end;min-height:28px;margin-bottom:8px}
+                    .assignment-upload-field>.file-upload{display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;height:210px;padding:24px!important;box-sizing:border-box;overflow:auto}
+                    .assignment-upload-field>.file-upload p{margin:12px 0 5px}
+                    .assignment-upload-field>.file-upload>div{width:100%;max-height:58px;overflow:auto;box-sizing:border-box}
+                    @media(max-width:700px){.assignment-upload-grid{grid-template-columns:1fr}.assignment-upload-field>.file-upload{height:190px}}
+                </style>
+                <div class="assignment-upload-grid">
                     <!-- ĐỀ BÀI -->
-                    <div>
+                    <div class="assignment-upload-field">
                         <label>File Đề Bài (PDF, Word) *</label>
                         <div class="file-upload" onclick="document.getElementById('prompt_file').click()" style="border: 2px dashed rgba(56, 189, 248, 0.4); padding: 30px; text-align: center; border-radius: 8px; cursor: pointer; transition: 0.3s; background: rgba(56, 189, 248, 0.05);">
                             <i class='bx bx-cloud-upload' style="font-size: 40px; color: #38bdf8;"></i>
@@ -329,7 +341,7 @@ require_once '../includes/header.php';
 
 
                     <!-- DỮ LIỆU -->
-                    <div>
+                    <div class="assignment-upload-field">
                         <label>Các File Thực Hành (Tùy chọn)</label>
                         <div class="file-upload" onclick="document.getElementById('resource_files').click()" style="border: 2px dashed rgba(255,255,255,0.2); padding: 30px; text-align: center; border-radius: 8px; cursor: pointer; transition: 0.3s; background: rgba(255,255,255,0.02);">
                             <i class='bx bx-copy-alt' style="font-size: 40px; color: var(--text-muted);"></i>

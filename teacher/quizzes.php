@@ -298,12 +298,28 @@ $page_title = 'Quản lý trắc nghiệm: ' . $course['title'];
 require_once '../includes/header.php';
 ?>
 <style>
-.quiz-layout{display:grid;grid-template-columns:minmax(250px,320px) minmax(0,1fr);gap:22px;align-items:start}
+.quiz-layout{display:grid;grid-template-columns:minmax(250px,320px) minmax(0,1fr);gap:22px;align-items:start;color-scheme:dark}
 .quiz-list{display:flex;flex-direction:column;gap:10px}.quiz-list-item{padding:12px;border:1px solid var(--border-color);border-radius:10px}.quiz-list-item.active{border-color:var(--primary);background:rgba(var(--primary-rgb),.12)}.quiz-list-link{display:block;color:var(--text-main);text-decoration:none;margin-bottom:9px}.quiz-list-actions{display:flex;gap:6px;flex-wrap:wrap}.quiz-list-actions form{margin:0}.quiz-list-actions .btn{min-height:34px;padding:6px 9px}.quiz-meta{font-size:13px;color:var(--text-muted)}
 .question-editor{padding:16px;border:1px solid var(--border-color);border-radius:12px;margin-top:12px}.answer-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .question-image{display:block;max-width:220px;max-height:150px;object-fit:contain;margin:8px 0;padding:5px;border-radius:8px;background:#fff}.image-tools{padding:9px;border:1px dashed var(--border-color);border-radius:8px;margin-top:8px}.image-tools label{font-size:13px;color:var(--text-muted)}
 .section-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.inline-actions{display:flex;gap:8px;flex-wrap:wrap}
-@media(max-width:850px){.quiz-layout{grid-template-columns:1fr}.answer-grid{grid-template-columns:1fr}}
+.quiz-layout .form-group{display:grid;gap:8px;margin-bottom:18px}
+.quiz-layout .form-group>label{color:var(--text-main);font-size:14px;font-weight:600}
+.quiz-layout .form-group input:not([type="checkbox"]),.quiz-layout .form-group textarea,.quiz-layout .form-group select,.quiz-layout .inline-actions select{width:100%;min-height:46px;padding:11px 14px;border:1px solid rgba(148,163,184,.22);border-radius:11px;background:rgba(15,23,42,.72);color:var(--text-main);font:inherit;outline:none;box-shadow:inset 0 1px 0 rgba(255,255,255,.025);transition:border-color .22s ease,box-shadow .22s ease,background .22s ease,transform .22s ease}
+.quiz-layout .form-group textarea{min-height:96px;line-height:1.55;resize:vertical}
+.quiz-layout .form-group input::placeholder,.quiz-layout .form-group textarea::placeholder{color:#64748b}
+.quiz-layout .form-group input:hover,.quiz-layout .form-group textarea:hover,.quiz-layout .form-group select:hover,.quiz-layout .inline-actions select:hover{border-color:rgba(129,140,248,.48);background:rgba(15,23,42,.9)}
+.quiz-layout .form-group input:focus,.quiz-layout .form-group textarea:focus,.quiz-layout .form-group select:focus,.quiz-layout .inline-actions select:focus{border-color:var(--primary);background:rgba(15,23,42,.96);box-shadow:0 0 0 4px rgba(var(--primary-rgb),.14),0 8px 24px rgba(0,0,0,.16)}
+.quiz-layout input[type="file"]{padding:8px!important;cursor:pointer}
+.quiz-layout input[type="file"]::file-selector-button{margin-right:12px;padding:8px 12px;border:0;border-radius:8px;background:rgba(var(--primary-rgb),.18);color:#a5b4fc;font-weight:700;cursor:pointer}
+.quiz-toggle{display:flex!important;align-items:center!important;gap:11px!important;margin:0 0 12px!important;color:var(--text-main);font-size:14px;font-weight:600;cursor:pointer}
+.quiz-toggle input[type="checkbox"]{position:relative;flex:0 0 44px;width:44px;height:24px;margin:0;appearance:none;-webkit-appearance:none;border:1px solid rgba(148,163,184,.3);border-radius:999px;background:rgba(15,23,42,.8);cursor:pointer;transition:.25s ease}
+.quiz-toggle input[type="checkbox"]::before{content:"";position:absolute;width:16px;height:16px;left:3px;top:3px;border-radius:50%;background:#cbd5e1;box-shadow:0 2px 5px rgba(0,0,0,.35);transition:transform .25s cubic-bezier(.22,1,.36,1),background .25s ease}
+.quiz-toggle input[type="checkbox"]:checked{border-color:var(--primary);background:var(--primary);box-shadow:0 0 0 3px rgba(var(--primary-rgb),.12)}
+.quiz-toggle input[type="checkbox"]:checked::before{transform:translateX(20px);background:#fff}
+.quiz-toggle-grid{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:4px;padding:14px;border:1px solid var(--border-color);border-radius:12px;background:rgba(15,23,42,.35)}
+.quiz-toggle-grid .quiz-toggle{min-height:34px;margin:0!important}
+@media(max-width:850px){.quiz-layout{grid-template-columns:1fr}.answer-grid{grid-template-columns:1fr}.quiz-toggle-grid{grid-template-columns:1fr}}
 </style>
 <a href="course_detail.php?id=<?php echo $courseId; ?>" style="color:var(--primary)"><i class='bx bx-arrow-back'></i> Quay lại khóa học</a>
 <h1><i class='bx bx-list-check'></i> Trắc nghiệm — <?php echo htmlspecialchars($course['title']); ?></h1>
@@ -320,8 +336,8 @@ require_once '../includes/header.php';
             <div class="form-group"><label>Thời gian (phút)</label><input type="number" name="duration_minutes" value="40" min="1" max="600"></div>
             <div class="form-group"><label>Số lượt làm tối đa (0 = không giới hạn)</label><input type="number" name="max_attempts" value="0" min="0" max="100"></div>
             <div class="form-group"><label>Số câu lấy cho mỗi lượt (0 = tất cả)</label><input type="number" name="question_limit" value="0" min="0" max="1000"></div>
-            <label style="display:flex;gap:8px;align-items:center;margin-bottom:10px"><input type="checkbox" name="shuffle_questions"> Đảo thứ tự câu hỏi</label>
-            <label style="display:flex;gap:8px;align-items:center;margin-bottom:15px"><input type="checkbox" name="shuffle_options"> Đảo thứ tự đáp án</label>
+            <label class="quiz-toggle"><input type="checkbox" name="shuffle_questions"> <span>Đảo thứ tự câu hỏi</span></label>
+            <label class="quiz-toggle" style="margin-bottom:18px!important"><input type="checkbox" name="shuffle_options"> <span>Đảo thứ tự đáp án</span></label>
             <button class="btn btn-primary"><i class='bx bx-plus'></i> Tạo trắc nghiệm</button>
         </form>
         <hr style="border-color:var(--border-color);margin:24px 0">
@@ -358,9 +374,11 @@ require_once '../includes/header.php';
                     <div class="form-group"><label>Số câu mỗi lượt (0 = tất cả)</label><input type="number" name="question_limit" value="<?php echo (int)($quiz['question_limit']??0);?>" min="0" max="1000"></div>
                     <div class="form-group"><label>Mở từ</label><input type="datetime-local" name="available_from" value="<?php echo !empty($quiz['available_from'])?date('Y-m-d\\TH:i',strtotime($quiz['available_from'])):'';?>"></div>
                     <div class="form-group"><label>Đóng lúc</label><input type="datetime-local" name="available_until" value="<?php echo !empty($quiz['available_until'])?date('Y-m-d\\TH:i',strtotime($quiz['available_until'])):'';?>"></div>
-                    <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" name="shuffle_questions" <?php echo !empty($quiz['shuffle_questions'])?'checked':'';?>> Đảo câu hỏi</label>
-                    <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" name="shuffle_options" <?php echo !empty($quiz['shuffle_options'])?'checked':'';?>> Đảo đáp án</label>
-                    <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" name="is_published" <?php echo $quiz['is_published']?'checked':'';?>> Mở cho học viên làm</label>
+                    <div class="quiz-toggle-grid">
+                        <label class="quiz-toggle"><input type="checkbox" name="shuffle_questions" <?php echo !empty($quiz['shuffle_questions'])?'checked':'';?>> <span>Đảo câu hỏi</span></label>
+                        <label class="quiz-toggle"><input type="checkbox" name="shuffle_options" <?php echo !empty($quiz['shuffle_options'])?'checked':'';?>> <span>Đảo đáp án</span></label>
+                        <label class="quiz-toggle"><input type="checkbox" name="is_published" <?php echo $quiz['is_published']?'checked':'';?>> <span>Mở cho học viên làm</span></label>
+                    </div>
                 </div>
                 <div class="inline-actions"><button class="btn btn-primary">Lưu thông tin</button></div>
             </form>

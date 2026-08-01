@@ -7,6 +7,11 @@ requireRole(['student', 'teacher', 'admin']);
 require_once '../config/database.php';
 require_once '../includes/notifications.php';
 
+global $pdo;
+if (!isset($pdo) || !($pdo instanceof PDO)) {
+    throw new RuntimeException('Database connection is not available.');
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verifyCsrfToken();
     if (($_POST['action'] ?? '') === 'mark_all_read') {
@@ -31,6 +36,10 @@ $stmt = $pdo->prepare(
 );
 $stmt->execute([(int) $_SESSION['user_id']]);
 $notifications = $stmt->fetchAll();
+
+$unreadStmt = $pdo->prepare('SELECT COUNT(*) FROM notifications WHERE user_id = ? AND read_at IS NULL');
+$unreadStmt->execute([(int) $_SESSION['user_id']]);
+$unreadNotifications = (int) $unreadStmt->fetchColumn();
 
 $page_title = 'Thông báo';
 require_once '../includes/header.php';

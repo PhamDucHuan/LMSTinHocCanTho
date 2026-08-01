@@ -132,7 +132,7 @@ if (!$is_staff) {
     $query .= " WHERE a.course_id IN (SELECT course_id FROM course_enrollments WHERE student_id = :enrollment_uid) OR a.course_id IS NULL";
     $queryParams['enrollment_uid'] = $student_id;
 }
-$query .= " ORDER BY a.created_at DESC";
+$query .= " ORDER BY a.priority_order, a.created_at, a.id";
 
 $stmt = $pdo->prepare($query);
 $stmt->execute($queryParams);

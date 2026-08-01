@@ -37,26 +37,33 @@ if (!empty($_SESSION['user_id'])) {
 
     <div class="container">
         <div class="auth-box">
-            <div class="auth-header">
-                <img src="assets/images/logo.png" class="auth-brand-logo" alt="Tin học Cần Thơ">
-                <h1 class="sr-only">Tin học Cần Thơ LMS</h1>
-                <p>Nền tảng quản lý học tập và chấm điểm tự động</p>
-            </div>
-            
-            <?php if (isset($_SESSION['error'])): ?>
-                <div class="alert alert-danger" style="background: rgba(239, 68, 68, 0.2); color: #fca5a5; padding: 10px; border-radius: 8px; margin-bottom: 20px; text-align: center; border: 1px solid rgba(239, 68, 68, 0.3);">
-                    <?php echo $_SESSION['error']; unset($_SESSION['error']); ?>
+            <h1 class="sr-only">Tin học Cần Thơ LMS</h1>
+            <section class="form-panel" aria-live="polite">
+                <div class="form-heading login-heading">
+                    <span class="eyebrow">Tài khoản LMS</span>
+                    <h2>Đăng nhập</h2>
+                    <p>Tiếp tục hành trình học tập của bạn.</p>
                 </div>
-            <?php endif; ?>
-            
-            <?php if (isset($_SESSION['success'])): ?>
-                <div class="alert alert-success" style="background: rgba(16, 185, 129, 0.2); color: #6ee7b7; padding: 10px; border-radius: 8px; margin-bottom: 20px; text-align: center; border: 1px solid rgba(16, 185, 129, 0.3);">
-                    <?php echo $_SESSION['success']; unset($_SESSION['success']); ?>
+                <div class="form-heading register-heading">
+                    <span class="eyebrow">Bắt đầu ngay</span>
+                    <h2>Tạo tài khoản</h2>
+                    <p>Đăng ký tài khoản học viên chỉ trong ít phút.</p>
                 </div>
-            <?php endif; ?>
 
-            <!-- Login Form -->
-            <form id="login-form" action="includes/auth.php" method="POST" class="auth-form active-form">
+                <?php if (isset($_SESSION['error'])): ?>
+                    <div class="alert alert-danger">
+                        <?php echo htmlspecialchars($_SESSION['error']); unset($_SESSION['error']); ?>
+                    </div>
+                <?php endif; ?>
+                <?php if (isset($_SESSION['success'])): ?>
+                    <div class="alert alert-success">
+                        <?php echo htmlspecialchars($_SESSION['success']); unset($_SESSION['success']); ?>
+                    </div>
+                <?php endif; ?>
+
+                <div class="forms-stage">
+                <!-- Login Form -->
+                <form id="login-form" action="includes/auth.php" method="POST" class="auth-form active-form">
                 <?php echo csrfField(); ?>
                 <input type="hidden" name="action" value="login">
                 
@@ -88,11 +95,10 @@ if (!empty($_SESSION['user_id'])) {
                     Đăng nhập bằng Google
                 </a>
 
-                <p class="switch-form">Chưa có tài khoản? <a href="#" id="show-register">Đăng ký ngay</a></p>
-            </form>
+                </form>
 
-            <!-- Register Form -->
-            <form id="register-form" action="includes/auth.php" method="POST" class="auth-form">
+                <!-- Register Form -->
+                <form id="register-form" action="includes/auth.php" method="POST" class="auth-form">
                 <?php echo csrfField(); ?>
                 <input type="hidden" name="action" value="register">
                 
@@ -115,8 +121,27 @@ if (!empty($_SESSION['user_id'])) {
 
                 <button type="submit" class="btn btn-primary">Tạo Tài Khoản <i class='bx bx-user-plus'></i></button>
 
-                <p class="switch-form">Đã có tài khoản? <a href="#" id="show-login">Đăng nhập</a></p>
-            </form>
+                </form>
+                </div>
+            </section>
+
+            <aside class="welcome-panel">
+                <div class="welcome-glow"></div>
+                <div class="welcome-content welcome-login">
+                    <img src="assets/images/logo.png" class="auth-brand-logo" alt="Tin học Cần Thơ">
+                    <span class="welcome-kicker">Chào mừng bạn đến với</span>
+                    <h2 class="welcome-panel-title">Tin Học Cần Thơ</h2>
+                    <p class="welcome-tagline"><span>Nơi</span><strong>Học Thật - Làm Thật - Chất Lượng Thật</strong></p>
+                    <button type="button" class="btn btn-switch" id="show-register">Đăng ký tài khoản <i class='bx bx-right-arrow-alt'></i></button>
+                </div>
+                <div class="welcome-content welcome-register">
+                    <img src="assets/images/logo.png" class="auth-brand-logo" alt="Tin học Cần Thơ">
+                    <span class="welcome-kicker">Rất vui gặp lại</span>
+                    <h2 class="welcome-panel-title">Đã có tài khoản?</h2>
+                    <p class="welcome-description">Đăng nhập để tiếp tục khóa học, hoàn thành bài tập và xem kết quả của bạn.</p>
+                    <button type="button" class="btn btn-switch" id="show-login"><i class='bx bx-left-arrow-alt'></i> Quay lại đăng nhập</button>
+                </div>
+            </aside>
         </div>
     </div>
 

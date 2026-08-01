@@ -1,32 +1,25 @@
 document.addEventListener('DOMContentLoaded', () => {
     const loginForm = document.getElementById('login-form');
     const registerForm = document.getElementById('register-form');
+    const authBox = document.querySelector('.auth-box');
     const showRegisterBtn = document.getElementById('show-register');
     const showLoginBtn = document.getElementById('show-login');
 
-    if (showRegisterBtn && showLoginBtn) {
+    if (authBox && showRegisterBtn && showLoginBtn) {
         showRegisterBtn.addEventListener('click', (e) => {
             e.preventDefault();
+            authBox.classList.add('register-mode');
             loginForm.classList.remove('active-form');
-            setTimeout(() => {
-                loginForm.style.display = 'none';
-                registerForm.style.display = 'block';
-                setTimeout(() => {
-                    registerForm.classList.add('active-form');
-                }, 50);
-            }, 400); // Wait for transition
+            registerForm.classList.add('active-form');
+            registerForm.querySelector('input:not([type="hidden"])')?.focus({ preventScroll: true });
         });
 
         showLoginBtn.addEventListener('click', (e) => {
             e.preventDefault();
+            authBox.classList.remove('register-mode');
             registerForm.classList.remove('active-form');
-            setTimeout(() => {
-                registerForm.style.display = 'none';
-                loginForm.style.display = 'block';
-                setTimeout(() => {
-                    loginForm.classList.add('active-form');
-                }, 50);
-            }, 400); // Wait for transition
+            loginForm.classList.add('active-form');
+            loginForm.querySelector('input:not([type="hidden"])')?.focus({ preventScroll: true });
         });
     }
 

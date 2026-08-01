@@ -199,8 +199,31 @@ if (!$assignment_id) {
                         </span>
                         <small><?php echo count($courseGroup['assignments']); ?> bài · <?php echo (int) $courseGroup['submission_count']; ?> bài nộp</small>
                     </summary>
-                    <div class="submission-assignment-grid">
-                        <?php foreach ($courseGroup['assignments'] as $overviewAssignment): ?>
+                    <div class="submission-type-groups">
+                    <?php
+                    $submissionTypeGroups = [
+                        'assignment' => [
+                            'title' => 'Bài tập',
+                            'icon' => 'bx-edit',
+                            'items' => array_values(array_filter($courseGroup['assignments'], static fn(array $item): bool => ($item['type'] ?? 'assignment') !== 'exam')),
+                        ],
+                        'exam' => [
+                            'title' => 'Bài thi',
+                            'icon' => 'bx-timer',
+                            'items' => array_values(array_filter($courseGroup['assignments'], static fn(array $item): bool => ($item['type'] ?? 'assignment') === 'exam')),
+                        ],
+                    ];
+                    ?>
+                    <?php foreach ($submissionTypeGroups as $submissionTypeKey => $submissionTypeGroup): ?>
+                        <?php if (!$submissionTypeGroup['items']) continue; ?>
+                        <?php $typeSubmissionCount = array_sum(array_map(static fn(array $item): int => (int) $item['submission_count'], $submissionTypeGroup['items'])); ?>
+                        <section class="submission-type-group <?php echo $submissionTypeKey; ?>">
+                            <div class="submission-type-heading">
+                                <span><i class='bx <?php echo $submissionTypeGroup['icon']; ?>'></i> <?php echo $submissionTypeGroup['title']; ?></span>
+                                <small><?php echo count($submissionTypeGroup['items']); ?> bài · <?php echo $typeSubmissionCount; ?> bài nộp</small>
+                            </div>
+                            <div class="submission-assignment-grid">
+                        <?php foreach ($submissionTypeGroup['items'] as $overviewAssignment): ?>
                             <article class="submission-assignment-card">
                                 <div>
                                     <span class="submission-type <?php echo ($overviewAssignment['type'] ?? '') === 'exam' ? 'exam' : ''; ?>">
@@ -236,6 +259,9 @@ if (!$assignment_id) {
                                 </a>
                             </article>
                         <?php endforeach; ?>
+                            </div>
+                        </section>
+                    <?php endforeach; ?>
                     </div>
                 </details>
             <?php endforeach; ?>
@@ -257,8 +283,17 @@ if (!$assignment_id) {
         .submission-course>summary span{display:flex;align-items:center;gap:10px;font-size:18px;color:var(--text-main)}
         .submission-course>summary i{color:var(--primary);font-size:24px}
         .submission-course>summary small{color:var(--text-muted)}
-        .submission-assignment-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(255px,1fr));gap:14px;padding:18px}
+        .submission-type-groups{display:grid;gap:22px;padding:18px}
+        .submission-type-group{display:grid;gap:13px}
+        .submission-type-group+.submission-type-group{padding-top:20px;border-top:1px solid var(--border-color)}
+        .submission-type-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 3px}
+        .submission-type-heading>span{display:flex;align-items:center;gap:8px;color:#38bdf8;font-size:17px;font-weight:700}
+        .submission-type-heading i{font-size:21px}
+        .submission-type-heading small{color:var(--text-muted)}
+        .submission-type-group.exam .submission-type-heading>span{color:#fb7185}
+        .submission-assignment-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(255px,1fr));gap:14px}
         .submission-assignment-card{display:flex;flex-direction:column;gap:13px;padding:17px;border:1px solid var(--border-color);border-radius:12px;background:var(--sidebar-bg)}
+        .submission-assignment-card>div:first-child{min-height:122px}
         .submission-assignment-card h3{margin:8px 0 0;overflow-wrap:anywhere}
         .submission-type{display:inline-flex;padding:4px 9px;border-radius:999px;background:rgba(14,165,233,.14);color:#38bdf8;font-size:12px;font-weight:700}
         .submission-type.exam{background:rgba(244,63,94,.14);color:#fb7185}
@@ -271,7 +306,7 @@ if (!$assignment_id) {
         .submission-student-chips span{display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;background:rgba(var(--primary-rgb),.12);color:var(--text-main);border:1px solid rgba(var(--primary-rgb),.2)}
         .submission-assignment-card .btn{margin-top:auto;justify-content:center}
         @media(max-width:900px){.submission-overview-head{grid-template-columns:1fr}.submission-filter{justify-self:stretch}}
-        @media(max-width:650px){.submission-course>summary{align-items:flex-start;flex-direction:column}.submission-assignment-grid{grid-template-columns:1fr;padding:12px}.submission-filter{grid-template-columns:1fr}.submission-filter,.submission-filter label,.submission-filter select,.submission-filter .btn{width:100%}.submission-filter .btn{transform:none}}
+        @media(max-width:650px){.submission-course>summary{align-items:flex-start;flex-direction:column}.submission-type-groups{padding:12px}.submission-type-heading{align-items:flex-start;flex-direction:column}.submission-assignment-grid{grid-template-columns:1fr}.submission-assignment-card>div:first-child{min-height:0}.submission-filter{grid-template-columns:1fr}.submission-filter,.submission-filter label,.submission-filter select,.submission-filter .btn{width:100%}.submission-filter .btn{transform:none}}
     </style>
     <?php
     require_once '../includes/footer.php';

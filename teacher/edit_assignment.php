@@ -15,7 +15,7 @@ if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_role'], ['teacher'
 
 $id = $_GET['id'] ?? null;
 if (!$id) {
-    header('Location: dashboard.php');
+    header('Location: ' . ($_SESSION['user_role'] === 'admin' ? '../admin/assignments.php' : 'assignments.php'));
     exit;
 }
 
@@ -74,7 +74,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $update->execute([$title, $description, $due_date, $category, $type, $duration_minutes, $module_settings_json, $id]);
     
     $_SESSION['success'] = "Cập nhật bài tập thành công!";
-    header('Location: dashboard.php');
+    header('Location: ' . ($_SESSION['user_role'] === 'admin' ? '../admin/assignments.php' : 'assignments.php'));
     exit;
 }
 

@@ -54,7 +54,7 @@ if ($selectedCourseId !== null) {
     }
 
     $where = $selectedCourseId === 0 ? 'a.course_id IS NULL' : 'a.course_id = ?';
-    $stmt = $pdo->prepare("SELECT a.*, s.score, s.submitted_at FROM assignments a LEFT JOIN submissions s ON s.assignment_id = a.id AND s.student_id = ? WHERE {$where} ORDER BY a.created_at DESC");
+    $stmt = $pdo->prepare("SELECT a.*, s.score, s.submitted_at FROM assignments a LEFT JOIN submissions s ON s.assignment_id = a.id AND s.student_id = ? WHERE {$where} ORDER BY a.priority_order, a.created_at, a.id");
     $params = [$userId];
     if ($selectedCourseId !== 0) $params[] = $selectedCourseId;
     $stmt->execute($params);

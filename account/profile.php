@@ -1,7 +1,7 @@
 <?php
-require_once '../includes/security.php';
+require_once __DIR__ . '/../includes/security.php';
 secureSessionStart();
-require_once '../config/database.php';
+require_once __DIR__ . '/../config/database.php';
 
 if (!isset($_SESSION['user_id'])) {
     header('Location: ../index.php');
