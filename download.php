@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/includes/security.php';
+require_once __DIR__ . '/includes/authorization.php';
 secureSessionStart();
 if (empty($_SESSION['user_id']) || !in_array($_SESSION['user_role'] ?? '', ['student', 'teacher', 'admin'], true)) {
     header('Location: index.php');
@@ -32,11 +33,7 @@ if ($kind === 'submission') {
     );
     $stmt->execute([$id]);
     $submission = $stmt->fetch();
-    $allowed = $submission && (
-        $role === 'admin'
-        || ($role === 'teacher' && (int) $submission['teacher_id'] === $userId)
-        || ($role === 'student' && (int) $submission['student_id'] === $userId)
-    );
+    $allowed = $submission && authorizationCanDownloadSubmission($role, $userId, (int) $submission['teacher_id'], (int) $submission['student_id']);
     if (!$allowed) {
         http_response_code(403);
         exit('Bạn không có quyền tải file này.');
@@ -50,9 +47,7 @@ if ($kind === 'submission') {
         $fileName = (string) $submission['file_name'];
     }
 } else {
-    $stmt = $pdo->prepare('SELECT * FROM assignments WHERE id=? LIMIT 1');
-    $stmt->execute([$id]);
-    $assignment = $stmt->fetch();
+    $assignment = authorizationFindAccessibleAssignment($pdo, (int) $id, $role, $userId);
     if (!$assignment) {
         http_response_code(404);
         exit('Không tìm thấy bài tập.');

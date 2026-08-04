@@ -3,6 +3,30 @@ require_once '../includes/security.php';
 secureSessionStart();
 require_once '../config/database.php';
 
+if (!isset($pdo)) {
+    if (isset($db)) {
+        $pdo = $db;
+    } elseif (isset($conn)) {
+        $pdo = $conn;
+    } elseif (defined('DB_HOST') && defined('DB_NAME') && defined('DB_USER') && defined('DB_PASS')) {
+        try {
+            $pdo = new PDO(
+                'mysql:host=' . DB_HOST . ';dbname=' . DB_NAME . ';charset=utf8mb4',
+                DB_USER,
+                DB_PASS,
+                [
+                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                ]
+            );
+        } catch (PDOException $e) {
+            die('Database connection failed: ' . htmlspecialchars($e->getMessage()));
+        }
+    } else {
+        die('Database connection variable $pdo is not defined.');
+    }
+}
+
 if (!isset($_SESSION['user_id']) || $_SESSION['user_role'] !== 'admin') {
     header('Location: ../index.php');
     exit;

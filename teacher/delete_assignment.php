@@ -1,8 +1,11 @@
 <?php
 require_once '../includes/security.php';
+require_once '../includes/authorization.php';
 secureSessionStart();
 require_once '../config/database.php';
 require_once '../includes/drive_helper.php';
+require_once '../includes/audit.php';
+require_once '../includes/audit.php';
 
 if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_role'], ['teacher', 'admin'])) {
     header('Location: ../index.php');
@@ -13,14 +16,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id'])) {
     verifyCsrfToken();
     $id = $_POST['id'];
     
-    if ($_SESSION['user_role'] === 'admin') {
-        $stmt = $pdo->prepare("SELECT * FROM assignments WHERE id = ?");
-        $stmt->execute([$id]);
-    } else {
-        $stmt = $pdo->prepare("SELECT * FROM assignments WHERE id = ? AND teacher_id = ?");
-        $stmt->execute([$id, $_SESSION['user_id']]);
-    }
-    $assignment = $stmt->fetch();
+    $assignment = authorizationFindManageableAssignment($pdo, (int) $id, (string) $_SESSION['user_role'], (int) $_SESSION['user_id']);
     
     if ($assignment) {
         // 1. Xóa file đề bài
@@ -71,6 +67,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id'])) {
             $stmt = $pdo->prepare("DELETE FROM assignments WHERE id = ? AND teacher_id = ?");
             $stmt->execute([$id, $_SESSION['user_id']]);
         }
+        writeAuditLog($pdo, 'assignment.deleted', 'assignment', (int) $id, ['title' => $assignment['title'], 'course_id' => $assignment['course_id']]);
+        writeAuditLog($pdo, 'assignment.deleted', 'assignment', (int) $id, ['title' => $assignment['title'], 'course_id' => $assignment['course_id']]);
         
         $_SESSION['success'] = "Đã xóa bài tập và toàn bộ dữ liệu trên Drive thành công!";
     } else {

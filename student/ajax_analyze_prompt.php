@@ -1,5 +1,6 @@
 <?php
 require_once '../includes/security.php';
+require_once '../includes/authorization.php';
 secureSessionStart();
 require_once '../config/database.php';
 require_once '../includes/drive_helper.php';
@@ -22,17 +23,7 @@ if (!$assignment_id) {
 }
 
 try {
-    if (($_SESSION['user_role'] ?? '') === 'admin') {
-        $stmt = $pdo->prepare("SELECT a.* FROM assignments a WHERE a.id = ?");
-        $stmt->execute([$assignment_id]);
-    } elseif (($_SESSION['user_role'] ?? '') === 'teacher') {
-        $stmt = $pdo->prepare("SELECT a.* FROM assignments a WHERE a.id = ? AND a.teacher_id = ?");
-        $stmt->execute([$assignment_id, $_SESSION['user_id']]);
-    } else {
-        $stmt = $pdo->prepare("SELECT a.* FROM assignments a WHERE a.id = ? AND (a.course_id IS NULL OR EXISTS (SELECT 1 FROM course_enrollments ce WHERE ce.course_id = a.course_id AND ce.student_id = ?))");
-        $stmt->execute([$assignment_id, $_SESSION['user_id']]);
-    }
-    $assignment = $stmt->fetch();
+    $assignment = authorizationFindAccessibleAssignment($pdo, (int) $assignment_id, (string) ($_SESSION['user_role'] ?? ''), (int) $_SESSION['user_id']);
     
     if (!$assignment) {
         echo json_encode(['status' => 'error', 'message' => 'Assignment not found']);

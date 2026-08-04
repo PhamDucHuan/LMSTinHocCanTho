@@ -71,6 +71,15 @@ function ensureQuizSchema(PDO $pdo): void
             CONSTRAINT fk_quiz_attempt_quiz FOREIGN KEY (quiz_id) REFERENCES quizzes(id) ON DELETE CASCADE,
             CONSTRAINT fk_quiz_attempt_student FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+        "CREATE TABLE IF NOT EXISTS quiz_attempt_events (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            attempt_id BIGINT UNSIGNED NOT NULL,
+            event_type VARCHAR(50) NOT NULL,
+            event_data JSON NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_quiz_attempt_events_attempt (attempt_id, created_at),
+            CONSTRAINT fk_quiz_attempt_events_attempt FOREIGN KEY (attempt_id) REFERENCES quiz_attempts(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
     ];
     foreach ($statements as $sql) {
         $pdo->exec($sql);
@@ -92,6 +101,14 @@ function ensureQuizSchema(PDO $pdo): void
     if (!isset($quizColumns['sort_order'])) {
         $pdo->exec('ALTER TABLE quizzes ADD COLUMN sort_order INT UNSIGNED NOT NULL DEFAULT 0 AFTER is_published');
     }
+    $quizAdditions = [
+        'passing_score' => 'DECIMAL(5,2) NOT NULL DEFAULT 5.00 AFTER duration_minutes',
+        'require_fullscreen' => 'TINYINT(1) NOT NULL DEFAULT 0 AFTER is_published',
+        'limit_device' => 'TINYINT(1) NOT NULL DEFAULT 0 AFTER require_fullscreen',
+    ];
+    foreach ($quizAdditions as $name => $definition) {
+        if (!isset($quizColumns[$name])) $pdo->exec("ALTER TABLE quizzes ADD COLUMN `{$name}` {$definition}");
+    }
     // Kiểu cột và các nâng cấp tiếp theo được quản lý bởi database/migrate.php.
 
     $attemptColumns = [];
@@ -103,5 +120,14 @@ function ensureQuizSchema(PDO $pdo): void
     }
     if (!isset($attemptColumns['paused_seconds'])) {
         $pdo->exec('ALTER TABLE quiz_attempts ADD COLUMN paused_seconds INT UNSIGNED NOT NULL DEFAULT 0 AFTER paused_at');
+    }
+    $attemptAdditions = [
+        'device_hash' => 'CHAR(64) NULL AFTER student_id',
+        'tab_switch_count' => 'INT UNSIGNED NOT NULL DEFAULT 0 AFTER paused_seconds',
+        'fullscreen_exit_count' => 'INT UNSIGNED NOT NULL DEFAULT 0 AFTER tab_switch_count',
+        'offline_count' => 'INT UNSIGNED NOT NULL DEFAULT 0 AFTER fullscreen_exit_count',
+    ];
+    foreach ($attemptAdditions as $name => $definition) {
+        if (!isset($attemptColumns[$name])) $pdo->exec("ALTER TABLE quiz_attempts ADD COLUMN `{$name}` {$definition}");
     }
 }

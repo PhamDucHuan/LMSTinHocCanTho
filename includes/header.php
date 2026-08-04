@@ -812,6 +812,10 @@ if (isset($pdo) && $pdo instanceof PDO && !empty($_SESSION['user_id'])) {
             
             if ($role === 'admin') {
                 $menus = [
+                    ['url' => '../admin/audit_logs.php', 'icon' => 'bx-history', 'label' => 'Nhật ký hoạt động', 'match' => ['admin/audit_logs.php']],
+                    ['url' => '../admin/ai_grading.php', 'icon' => 'bx-bot', 'label' => 'Giám sát chấm AI', 'match' => ['admin/ai_grading.php']],
+                    ['url' => '../admin/system_health.php', 'icon' => 'bx-pulse', 'label' => 'Tình trạng hệ thống', 'match' => ['admin/system_health.php']],
+                    ['url' => '../teacher/question_bank.php', 'icon' => 'bx-library', 'label' => 'Ngân hàng câu hỏi', 'match' => ['teacher/question_bank.php']],
                     ['url' => '../admin/dashboard.php', 'icon' => 'bx-shield', 'label' => 'Tổng quan', 'match' => ['admin/dashboard.php']],
                     ['url' => '../admin/users.php', 'icon' => 'bx-group', 'label' => 'Quản lý Tài khoản', 'match' => ['admin/users.php']],
                     ['url' => '../teacher/courses.php', 'icon' => 'bx-book-open', 'label' => 'Quản lý Khóa học', 'match' => ['teacher/courses.php', 'teacher/course_detail.php', 'teacher/quizzes.php']],
@@ -823,6 +827,7 @@ if (isset($pdo) && $pdo instanceof PDO && !empty($_SESSION['user_id'])) {
                 ];
             } elseif ($role === 'teacher') {
                 $menus = [
+                    ['url' => '../teacher/question_bank.php', 'icon' => 'bx-library', 'label' => 'Ngân hàng câu hỏi', 'match' => ['teacher/question_bank.php']],
                     ['url' => '../teacher/dashboard.php', 'icon' => 'bx-bar-chart-alt-2', 'label' => 'Tổng quan', 'match' => ['teacher/dashboard.php']],
                     ['url' => '../teacher/courses.php', 'icon' => 'bx-book-open', 'label' => 'Quản lý Khóa học', 'match' => ['teacher/courses.php', 'teacher/course_detail.php', 'teacher/quizzes.php']],
                     ['url' => '../teacher/assignments.php', 'icon' => 'bx-book-content', 'label' => 'Danh sách Bài tập', 'match' => ['teacher/assignments.php', 'teacher/edit_assignment.php']],

@@ -4,6 +4,8 @@ secureSessionStart();
 require_once '../config/database.php';
 require_once '../includes/drive_helper.php';
 
+global $pdo;
+
 if (!isset($_SESSION['user_id']) || $_SESSION['user_role'] !== 'admin') {
     header('Location: ../index.php');
     exit;

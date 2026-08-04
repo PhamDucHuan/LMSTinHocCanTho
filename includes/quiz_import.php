@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 /**
  * Đọc file câu hỏi CSV hoặc Excel .xlsx và trả về các dòng dữ liệu.
- * Mỗi dòng luôn có tối đa 6 cột theo mẫu trắc nghiệm.
+ * Mỗi dòng có tối đa 8 cột để dùng chung cho bài trắc nghiệm và ngân hàng câu hỏi.
  */
 function readQuizImportRows(string $path, string $extension): array
 {
@@ -154,7 +154,7 @@ function readQuizXlsxRows(string $path): array
         $xpath = new DOMXPath($document);
         $rows = [];
         foreach ($xpath->query('//*[local-name()="sheetData"]/*[local-name()="row"]') as $rowNode) {
-            $row = array_fill(0, 6, '');
+            $row = array_fill(0, 8, '');
             $excelRow = (int) ($rowNode->getAttribute('r') ?: count($rows) + 1);
             foreach ($xpath->query('./*[local-name()="c"]', $rowNode) as $cell) {
                 $reference = strtoupper($cell->getAttribute('r'));
@@ -164,7 +164,7 @@ function readQuizXlsxRows(string $path): array
                     $column = $column * 26 + (ord($letter) - 64);
                 }
                 $column--;
-                if ($column < 0 || $column > 5) continue;
+                if ($column < 0 || $column > 7) continue;
 
                 $type = $cell->getAttribute('t');
                 $value = '';

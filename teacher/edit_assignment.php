@@ -1,7 +1,10 @@
 <?php
 require_once '../includes/security.php';
+require_once '../includes/authorization.php';
 secureSessionStart();
 require_once '../config/database.php';
+require_once '../includes/audit.php';
+require_once '../includes/audit.php';
 
 /** @var PDO $pdo */
 if (!isset($pdo) || !($pdo instanceof PDO)) {
@@ -19,15 +22,7 @@ if (!$id) {
     exit;
 }
 
-// Fetch assignment
-if ($_SESSION['user_role'] === 'admin') {
-    $stmt = $pdo->prepare("SELECT * FROM assignments WHERE id = ?");
-    $stmt->execute([$id]);
-} else {
-    $stmt = $pdo->prepare("SELECT * FROM assignments WHERE id = ? AND teacher_id = ?");
-    $stmt->execute([$id, $_SESSION['user_id']]);
-}
-$assignment = $stmt->fetch() ?? null;
+$assignment = authorizationFindManageableAssignment($pdo, (int) $id, (string) $_SESSION['user_role'], (int) $_SESSION['user_id']);
 
 if (!$assignment) {
     die("Bài tập không tồn tại hoặc bạn không có quyền sửa.");
@@ -72,6 +67,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     $update = $pdo->prepare("UPDATE assignments SET title = ?, description = ?, due_date = ?, category = ?, type = ?, duration_minutes = ?, module_settings = ? WHERE id = ?");
     $update->execute([$title, $description, $due_date, $category, $type, $duration_minutes, $module_settings_json, $id]);
+    writeAuditLog($pdo, 'assignment.updated', 'assignment', (int) $id, [
+        'before' => ['title' => $assignment['title'], 'due_date' => $assignment['due_date'], 'type' => $assignment['type']],
+        'after' => ['title' => $title, 'due_date' => $due_date, 'type' => $type],
+    ]);
+    writeAuditLog($pdo, 'assignment.updated', 'assignment', (int) $id, [
+        'before' => ['title' => $assignment['title'], 'due_date' => $assignment['due_date'], 'type' => $assignment['type']],
+        'after' => ['title' => $title, 'due_date' => $due_date, 'type' => $type],
+    ]);
     
     $_SESSION['success'] = "Cập nhật bài tập thành công!";
     header('Location: ' . ($_SESSION['user_role'] === 'admin' ? '../admin/assignments.php' : 'assignments.php'));

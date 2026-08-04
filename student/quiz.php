@@ -14,10 +14,11 @@ $quizSlug=trim((string)($_GET['quiz']??''));
 $quizId = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT) ?: filter_input(INPUT_POST, 'quiz_id', FILTER_VALIDATE_INT);
 if($quizSlug!==''){$slugStmt=$pdo->prepare('SELECT id FROM quizzes WHERE slug=?');$slugStmt->execute([$quizSlug]);$quizId=(int)$slugStmt->fetchColumn();}
 $studentId = (int) $_SESSION['user_id'];
-$stmt = $pdo->prepare('SELECT q.*,c.title course_title,c.slug course_slug FROM quizzes q JOIN courses c ON c.id=q.course_id JOIN course_enrollments ce ON ce.course_id=c.id AND ce.student_id=? WHERE q.id=? AND q.is_published=1');
-$stmt->execute([$studentId,$quizId]);
+$deviceHash = hash('sha256', (string)($_SERVER['HTTP_USER_AGENT'] ?? '') . '|' . (string)($_SERVER['HTTP_ACCEPT_LANGUAGE'] ?? ''));
+$stmt = $pdo->prepare('SELECT q.*,c.title course_title,c.slug course_slug FROM quizzes q JOIN courses c ON c.id=q.course_id WHERE q.id=? AND q.is_published=1');
+$stmt->execute([$quizId]);
 $quiz = $stmt->fetch();
-if(!$quiz){http_response_code(403);exit('Bài trắc nghiệm không tồn tại hoặc bạn chưa được phép làm.');}
+if(!$quiz){http_response_code(404);exit('Bài trắc nghiệm không tồn tại hoặc chưa được mở.');}
 if (!empty($quiz['available_from']) && strtotime($quiz['available_from']) > time()) {
     http_response_code(403);
     exit('Bài trắc nghiệm chưa đến thời gian mở.');
@@ -56,15 +57,27 @@ if(!$attempt){
         if (!empty($quiz['shuffle_options'])) shuffle($letters);
         $optionOrder[(string)$questionId] = $letters;
     }
-    $pdo->prepare('INSERT INTO quiz_attempts (quiz_id,student_id,question_order,option_order,started_at) VALUES (?,?,?,?,NOW())')
+    $pdo->prepare('INSERT INTO quiz_attempts (quiz_id,student_id,device_hash,question_order,option_order,started_at) VALUES (?,?,?,?,?,NOW())')
         ->execute([
             $quizId,
             $studentId,
+            $deviceHash,
             json_encode($questionOrder),
             json_encode($optionOrder),
         ]);
     $attemptId=(int)$pdo->lastInsertId();
     header('Location: '.friendlyUrl('quiz.php','quiz',(string)$quiz['slug']).'&attempt='.$attemptId);exit;
+}
+
+if (!empty($quiz['limit_device'])) {
+    if (!empty($attempt['device_hash']) && !hash_equals((string)$attempt['device_hash'], $deviceHash)) {
+        http_response_code(403);
+        exit('Lượt làm bài này đã được mở trên một thiết bị hoặc trình duyệt khác.');
+    }
+    if (empty($attempt['device_hash'])) {
+        $pdo->prepare('UPDATE quiz_attempts SET device_hash=? WHERE id=? AND student_id=?')->execute([$deviceHash,$attemptId,$studentId]);
+        $attempt['device_hash']=$deviceHash;
+    }
 }
 
 $storedQuestionOrder=json_decode($attempt['question_order']??'[]',true)?:[];
@@ -108,6 +121,17 @@ if($_SERVER['REQUEST_METHOD']==='POST' && ($_POST['action']??'')==='autosave' &&
     exit;
 }
 
+if($_SERVER['REQUEST_METHOD']==='POST' && ($_POST['action']??'')==='log_event' && !$attempt['submitted_at']){
+    verifyCsrfToken();
+    $eventType=(string)($_POST['event_type']??'');
+    $allowed=['tab_hidden','fullscreen_exit','offline','online'];
+    if(!in_array($eventType,$allowed,true)){http_response_code(422);exit;}
+    $pdo->prepare('INSERT INTO quiz_attempt_events (attempt_id,event_type,event_data) VALUES (?,?,?)')->execute([$attemptId,$eventType,json_encode(['at'=>date(DATE_ATOM)],JSON_UNESCAPED_UNICODE)]);
+    $column=['tab_hidden'=>'tab_switch_count','fullscreen_exit'=>'fullscreen_exit_count','offline'=>'offline_count'][$eventType]??null;
+    if($column)$pdo->prepare("UPDATE quiz_attempts SET {$column}={$column}+1 WHERE id=? AND student_id=?")->execute([$attemptId,$studentId]);
+    header('Content-Type: application/json; charset=utf-8');echo json_encode(['success'=>true]);exit;
+}
+
 if($_SERVER['REQUEST_METHOD']==='POST' && ($_POST['action']??'')!=='toggle_pause' && !$attempt['submitted_at']){
     verifyCsrfToken();
     $answers=[];$correct=0;$earnedPoints=0.0;$totalPoints=0.0;
@@ -143,6 +167,7 @@ require_once '../includes/header.php';
 </style>
 <a href="<?php echo htmlspecialchars(friendlyUrl('quizzes.php','course',$quiz['course_slug']));?>" style="color:var(--primary)"><i class='bx bx-arrow-back'></i> Danh sách trắc nghiệm</a>
 <h1><?php echo htmlspecialchars($quiz['title']);?></h1>
+<?php if(!$attempt['submitted_at']):?><div id="quiz-integrity-status" class="box" style="padding:10px 14px;margin-bottom:14px;color:var(--text-muted);font-size:13px"><i class='bx bx-cloud-upload'></i> Đáp án được tự động lưu. Hệ thống đang ghi nhận trạng thái làm bài.</div><?php endif;?>
 <?php if($attempt['submitted_at']):?>
 <div class="box" style="text-align:center;margin-bottom:20px"><h2>Kết quả</h2><div style="font-size:46px;color:var(--success);font-weight:700"><?php echo htmlspecialchars($attempt['score']);?>/10</div><p>Đúng <?php echo (int)$attempt['correct_count'];?>/<?php echo (int)$attempt['total_questions'];?> câu</p><?php if((int)($quiz['max_attempts']??0)===0||$completedAttempts<(int)$quiz['max_attempts']):?><a class="btn btn-primary" href="<?php echo htmlspecialchars(friendlyUrl('quiz.php','quiz',$quiz['slug']));?>">Làm lại</a><?php else:?><p style="color:var(--text-muted)">Bạn đã dùng hết <?php echo (int)$quiz['max_attempts'];?> lượt làm.</p><?php endif;?></div>
 <?php endif;?>
@@ -186,9 +211,20 @@ require_once '../includes/header.php';
 <?php if(!$attempt['submitted_at']):?><script>
 let quizSeconds=<?php echo $remaining;?>,quizPaused=<?php echo $isPaused?'true':'false';?>;const quizTime=document.getElementById('quiz-time'),quizForm=document.getElementById('quiz-form'),pauseButton=document.getElementById('quiz-pause'),confirmOverlay=document.getElementById('quiz-confirm-overlay');
 let quizSaveTimer=null,quizSubmitting=false;
-async function saveQuizAnswers(){if(quizSubmitting)return;const data=new FormData(quizForm);data.set('action','autosave');try{const response=await fetch(location.href,{method:'POST',body:data,headers:{'X-Requested-With':'XMLHttpRequest'}});if(!response.ok)throw new Error();}catch(error){console.warn('Không thể tự lưu đáp án.');}}
+const integrityStatus=document.getElementById('quiz-integrity-status');
+function setIntegrityStatus(text,color='var(--text-muted)'){if(integrityStatus){integrityStatus.lastChild.textContent=' '+text;integrityStatus.style.color=color;}}
+async function saveQuizAnswers(){if(quizSubmitting)return;const data=new FormData(quizForm);data.set('action','autosave');setIntegrityStatus('Đang lưu đáp án...');try{const response=await fetch(location.href,{method:'POST',body:data,headers:{'X-Requested-With':'XMLHttpRequest'}});if(!response.ok)throw new Error();setIntegrityStatus('Đã lưu đáp án lúc '+new Date().toLocaleTimeString('vi-VN'),'var(--success)');}catch(error){setIntegrityStatus('Mất kết nối, đáp án sẽ được lưu lại khi có mạng.','var(--danger)');}}
+async function logQuizEvent(eventType){const data=new FormData();data.set('csrf_token',quizForm.querySelector('[name="csrf_token"]').value);data.set('action','log_event');data.set('quiz_id','<?php echo $quizId;?>');data.set('attempt_id','<?php echo $attemptId;?>');data.set('event_type',eventType);try{await fetch(location.href,{method:'POST',body:data,headers:{'X-Requested-With':'XMLHttpRequest'},keepalive:true});}catch(error){localStorage.setItem('quiz_pending_event_<?php echo $attemptId;?>',eventType);}}
 quizForm.addEventListener('change',()=>{clearTimeout(quizSaveTimer);quizSaveTimer=setTimeout(saveQuizAnswers,700);});
 setInterval(saveQuizAnswers,15000);
+document.addEventListener('visibilitychange',()=>{if(document.hidden)logQuizEvent('tab_hidden');});
+window.addEventListener('offline',()=>{logQuizEvent('offline');setIntegrityStatus('Đã mất kết nối Internet. Đáp án vẫn được giữ trên màn hình.','var(--danger)');});
+window.addEventListener('online',()=>{logQuizEvent('online');localStorage.removeItem('quiz_pending_event_<?php echo $attemptId;?>');saveQuizAnswers();});
+let quizFullscreenEntered=false;
+document.addEventListener('fullscreenchange',()=>{if(document.fullscreenElement)quizFullscreenEntered=true;else if(quizFullscreenEntered)logQuizEvent('fullscreen_exit');});
+<?php if(!empty($quiz['require_fullscreen'])):?>
+const fullscreenButton=document.createElement('button');fullscreenButton.type='button';fullscreenButton.className='btn btn-outline';fullscreenButton.innerHTML="<i class='bx bx-fullscreen'></i> Toàn màn hình";fullscreenButton.addEventListener('click',()=>document.documentElement.requestFullscreen?.());document.querySelector('.quiz-timer-actions')?.appendChild(fullscreenButton);
+<?php endif;?>
 function drawQuizTime(){const h=String(Math.floor(quizSeconds/3600)).padStart(2,'0'),m=String(Math.floor(quizSeconds%3600/60)).padStart(2,'0'),s=String(quizSeconds%60).padStart(2,'0');quizTime.textContent=`${h}:${m}:${s}`;if(!quizPaused){if(quizSeconds<=0){quizSubmitting=true;quizForm.submit();return;}quizSeconds--;}}
 pauseButton?.addEventListener('click',async()=>{pauseButton.disabled=true;const data=new FormData();data.set('csrf_token',quizForm.querySelector('[name="csrf_token"]').value);data.set('action','toggle_pause');data.set('quiz_id','<?php echo $quizId;?>');data.set('attempt_id','<?php echo $attemptId;?>');try{const response=await fetch(location.href,{method:'POST',body:data,headers:{'X-Requested-With':'XMLHttpRequest'}});const result=await response.json();if(!response.ok||!result.success)throw new Error('Không thể cập nhật');quizPaused=result.paused;pauseButton.querySelector('i').className=quizPaused?'bx bx-play':'bx bx-pause';pauseButton.querySelector('span').textContent=quizPaused?'Tiếp tục':'Tạm dừng';}catch(error){alert('Không thể tạm dừng lúc này.');}finally{pauseButton.disabled=false;}});
 document.getElementById('quiz-submit-open')?.addEventListener('click',()=>{confirmOverlay.hidden=false;document.getElementById('quiz-submit-confirm')?.focus();});

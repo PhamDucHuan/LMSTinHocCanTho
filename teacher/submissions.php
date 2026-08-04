@@ -1,5 +1,6 @@
 <?php
 require_once '../includes/security.php';
+require_once '../includes/authorization.php';
 secureSessionStart();
 require_once '../config/database.php';
 require_once '../includes/audit.php';
@@ -317,14 +318,7 @@ if ($pdo === null) {
     die("Database connection error");
 }
 
-if ($_SESSION['user_role'] === 'admin') {
-    $stmt = $pdo->prepare("SELECT * FROM assignments WHERE id = ?");
-    $stmt->execute([$assignment_id]);
-} else {
-    $stmt = $pdo->prepare("SELECT * FROM assignments WHERE id = ? AND teacher_id = ?");
-    $stmt->execute([$assignment_id, $_SESSION['user_id']]);
-}
-$assignment = $stmt->fetch();
+$assignment = authorizationFindManageableAssignment($pdo, (int) $assignment_id, (string) $_SESSION['user_role'], (int) $_SESSION['user_id']);
 
 if (!$assignment) {
     die("Bài tập không tồn tại hoặc bạn không có quyền xem.");

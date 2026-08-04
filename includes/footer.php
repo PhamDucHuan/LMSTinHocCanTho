@@ -1,4 +1,14 @@
         </div> <!-- end page-content -->
+        <footer class="lms-footer">
+            <span><i class='bx bx-code-alt'></i> DESIGN BY: <strong>PHAM DUC HUAN</strong></span>
+        </footer>
+        <style>
+            .lms-footer{margin-top:auto;padding:18px 40px;border-top:1px solid var(--border-color);color:var(--text-muted);font-size:13px;text-align:center;background:rgba(var(--primary-rgb),.025)}
+            .lms-footer span{display:inline-flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap}
+            .lms-footer i{color:var(--primary);font-size:18px}
+            .lms-footer strong{color:var(--text-main);font-weight:600}
+            @media(max-width:700px){.lms-footer{padding:16px 14px}}
+        </style>
     </main> <!-- end main-content -->
     <script>
         document.addEventListener('DOMContentLoaded', function() {

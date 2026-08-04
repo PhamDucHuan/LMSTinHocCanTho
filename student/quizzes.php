@@ -18,15 +18,13 @@ if ($courseSlug !== '') {
     $courseId = (int) $slugStmt->fetchColumn();
 }
 if (!$courseId) {
-    $stmt = $pdo->prepare("
+    $stmt = $pdo->query("
         SELECT c.id, c.title, c.slug, c.description, COUNT(q.id) AS quiz_count
         FROM courses c
-        JOIN course_enrollments ce ON ce.course_id=c.id AND ce.student_id=?
-        LEFT JOIN quizzes q ON q.course_id=c.id AND q.is_published=1
-        GROUP BY c.id,c.title,c.description
-        ORDER BY ce.enrolled_at DESC
+        JOIN quizzes q ON q.course_id=c.id AND q.is_published=1
+        GROUP BY c.id,c.title,c.slug,c.description
+        ORDER BY c.created_at DESC,c.id DESC
     ");
-    $stmt->execute([$_SESSION['user_id']]);
     $quizCourses = $stmt->fetchAll();
     $page_title = 'Làm trắc nghiệm';
     require_once '../includes/header.php';
@@ -36,7 +34,7 @@ if (!$courseId) {
     @media(max-width:1000px){.quiz-course-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:650px){.quiz-course-grid{grid-template-columns:1fr}}
     </style>
     <h1><i class='bx bx-list-check'></i> Làm trắc nghiệm</h1>
-    <p style="color:var(--text-muted)">Chọn khóa học để xem các bài trắc nghiệm đang mở.</p>
+    <p style="color:var(--text-muted)">Chọn khóa học để xem các bài trắc nghiệm đang mở. Bạn không cần ghi danh khóa học để làm trắc nghiệm.</p>
     <div class="quiz-course-grid">
         <?php foreach($quizCourses as $quizCourse):?>
             <article class="box quiz-course-card">
@@ -47,16 +45,16 @@ if (!$courseId) {
                 <a href="<?php echo htmlspecialchars(friendlyUrl('quizzes.php','course',$quizCourse['slug']));?>" class="btn btn-primary"><i class='bx bx-right-arrow-alt'></i> Xem trắc nghiệm</a>
             </article>
         <?php endforeach;?>
-        <?php if(!$quizCourses):?><div class="box empty-state">Bạn chưa tham gia khóa học nào.</div><?php endif;?>
+        <?php if(!$quizCourses):?><div class="box empty-state">Hiện chưa có bài trắc nghiệm nào đang mở.</div><?php endif;?>
     </div>
     <?php
     require_once '../includes/footer.php';
     exit;
 }
-$stmt = $pdo->prepare('SELECT c.title,c.slug FROM courses c JOIN course_enrollments ce ON ce.course_id=c.id AND ce.student_id=? WHERE c.id=?');
-$stmt->execute([$_SESSION['user_id'], $courseId]);
+$stmt = $pdo->prepare('SELECT c.title,c.slug FROM courses c WHERE c.id=?');
+$stmt->execute([$courseId]);
 $course = $stmt->fetch();
-if (!$course) { http_response_code(403); exit('Bạn chưa được ghi danh vào khóa học này.'); }
+if (!$course) { http_response_code(404); exit('Khóa học không tồn tại.'); }
 $stmt = $pdo->prepare("SELECT q.*, COUNT(DISTINCT qs.id) section_count, COUNT(qq.id) question_count,
     (SELECT qa.score FROM quiz_attempts qa WHERE qa.quiz_id=q.id AND qa.student_id=? AND qa.submitted_at IS NOT NULL ORDER BY qa.submitted_at DESC LIMIT 1) latest_score
     FROM quizzes q LEFT JOIN quiz_sections qs ON qs.quiz_id=q.id LEFT JOIN quiz_questions qq ON qq.section_id=qs.id

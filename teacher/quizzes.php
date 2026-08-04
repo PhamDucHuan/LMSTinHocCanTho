@@ -120,6 +120,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $redirect($courseId, $newQuizId);
         }
 
+        if ($action === 'reorder_quizzes') {
+            $requestedIds = json_decode((string) ($_POST['quiz_ids'] ?? '[]'), true);
+            if (!is_array($requestedIds)) {
+                throw new RuntimeException('Thứ tự bài trắc nghiệm không hợp lệ.');
+            }
+            $requestedIds = array_values(array_unique(array_filter(array_map('intval', $requestedIds))));
+            $orderStmt = $pdo->prepare('SELECT id FROM quizzes WHERE course_id=? ORDER BY sort_order,id');
+            $orderStmt->execute([$courseId]);
+            $courseQuizIds = array_map('intval', $orderStmt->fetchAll(PDO::FETCH_COLUMN));
+            $validatedIds = $requestedIds;
+            $validatedCourseIds = $courseQuizIds;
+            sort($validatedIds);
+            sort($validatedCourseIds);
+            if ($validatedIds !== $validatedCourseIds) {
+                throw new RuntimeException('Danh sách bài trắc nghiệm đã thay đổi. Vui lòng tải lại trang.');
+            }
+
+            $pdo->beginTransaction();
+            $updateOrder = $pdo->prepare('UPDATE quizzes SET sort_order=? WHERE id=? AND course_id=?');
+            foreach ($requestedIds as $index => $id) {
+                $updateOrder->execute([$index + 1, $id, $courseId]);
+            }
+            writeAuditLog($pdo, 'quiz.reordered', 'course', $courseId, ['quiz_ids' => $requestedIds]);
+            $pdo->commit();
+
+            if (strtolower((string) ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '')) === 'xmlhttprequest') {
+                header('Content-Type: application/json; charset=utf-8');
+                echo json_encode(['success' => true], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+            $_SESSION['success'] = 'Đã cập nhật thứ tự bài trắc nghiệm.';
+            $redirect($courseId, $quizId);
+        }
+
         $quizCheck = $pdo->prepare('SELECT id FROM quizzes WHERE id = ? AND course_id = ?');
         $quizCheck->execute([$quizId, $courseId]);
         if (!$quizCheck->fetchColumn()) throw new RuntimeException('Bài trắc nghiệm không hợp lệ.');
@@ -147,7 +181,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt = $pdo->prepare(
                 'UPDATE quizzes
                  SET title=?, description=?, duration_minutes=?, max_attempts=?, question_limit=?,
-                     shuffle_questions=?, shuffle_options=?, available_from=?, available_until=?, is_published=?
+                     shuffle_questions=?, shuffle_options=?, available_from=?, available_until=?, is_published=?,
+                     passing_score=?, require_fullscreen=?, limit_device=?
                  WHERE id=?'
             );
             $stmt->execute([
@@ -161,11 +196,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $availableFrom !== '' ? date('Y-m-d H:i:s', strtotime($availableFrom)) : null,
                 $availableUntil !== '' ? date('Y-m-d H:i:s', strtotime($availableUntil)) : null,
                 isset($_POST['is_published']) ? 1 : 0,
+                max(0, min(10, (float) ($_POST['passing_score'] ?? 5))),
+                isset($_POST['require_fullscreen']) ? 1 : 0,
+                isset($_POST['limit_device']) ? 1 : 0,
                 $quizId,
             ]);
+            writeAuditLog($pdo, 'quiz.updated', 'quiz', (int) $quizId, ['title' => $title]);
             $_SESSION['success'] = 'Đã cập nhật bài trắc nghiệm.';
         } elseif ($action === 'delete_quiz') {
             $pdo->prepare('DELETE FROM quizzes WHERE id=? AND course_id=?')->execute([$quizId, $courseId]);
+            writeAuditLog($pdo, 'quiz.deleted', 'quiz', (int) $quizId, ['course_id' => $courseId]);
             $_SESSION['success'] = 'Đã xóa bài trắc nghiệm.';
             $redirect($courseId);
         } elseif ($action === 'import_section') {
@@ -263,6 +303,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } catch (Throwable $error) {
         if ($pdo->inTransaction()) $pdo->rollBack();
+        if (strtolower((string) ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '')) === 'xmlhttprequest') {
+            http_response_code(422);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['success' => false, 'message' => $error->getMessage()], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
         $_SESSION['error'] = $error->getMessage();
     }
     $redirect($courseId, $quizId ?: null);
@@ -299,7 +345,8 @@ require_once '../includes/header.php';
 ?>
 <style>
 .quiz-layout{display:grid;grid-template-columns:minmax(250px,320px) minmax(0,1fr);gap:22px;align-items:start;color-scheme:dark}
-.quiz-list{display:flex;flex-direction:column;gap:10px}.quiz-list-item{padding:12px;border:1px solid var(--border-color);border-radius:10px}.quiz-list-item.active{border-color:var(--primary);background:rgba(var(--primary-rgb),.12)}.quiz-list-link{display:block;color:var(--text-main);text-decoration:none;margin-bottom:9px}.quiz-list-actions{display:flex;gap:6px;flex-wrap:wrap}.quiz-list-actions form{margin:0}.quiz-list-actions .btn{min-height:34px;padding:6px 9px}.quiz-meta{font-size:13px;color:var(--text-muted)}
+.quiz-list{display:flex;flex-direction:column;gap:10px}.quiz-list-item{position:relative;padding:12px;border:1px solid var(--border-color);border-radius:10px;transition:transform .18s ease,border-color .18s ease,opacity .18s ease,box-shadow .18s ease}.quiz-list-item.active{border-color:var(--primary);background:rgba(var(--primary-rgb),.12)}.quiz-list-item.dragging{opacity:.42;border-color:var(--primary);box-shadow:0 12px 30px rgba(0,0,0,.25)}.quiz-list-item.drag-over{transform:translateY(4px)}.quiz-list-link{display:block;color:var(--text-main);text-decoration:none;margin:0 34px 9px 0}.quiz-list-actions{display:flex;gap:6px;flex-wrap:wrap}.quiz-list-actions form{margin:0}.quiz-list-actions .btn{min-height:34px;padding:6px 9px}.quiz-meta{font-size:13px;color:var(--text-muted)}
+.quiz-drag-handle{position:absolute;top:9px;right:9px;width:30px;height:30px;display:grid;place-items:center;border:0;border-radius:8px;background:rgba(148,163,184,.1);color:var(--text-muted);font-size:21px;cursor:grab;touch-action:none}.quiz-drag-handle:active{cursor:grabbing}.quiz-sort-help{display:flex;align-items:center;gap:6px;margin:-4px 0 11px;color:var(--text-muted);font-size:12px}.quiz-sort-status{min-height:18px;margin:7px 0 0;font-size:12px;color:var(--text-muted)}.quiz-sort-status.saving{color:#fbbf24}.quiz-sort-status.saved{color:var(--success)}.quiz-sort-status.error{color:var(--danger)}
 .question-editor{padding:16px;border:1px solid var(--border-color);border-radius:12px;margin-top:12px}.answer-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .question-image{display:block;max-width:220px;max-height:150px;object-fit:contain;margin:8px 0;padding:5px;border-radius:8px;background:#fff}.image-tools{padding:9px;border:1px dashed var(--border-color);border-radius:8px;margin-top:8px}.image-tools label{font-size:13px;color:var(--text-muted)}
 .section-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.inline-actions{display:flex;gap:8px;flex-wrap:wrap}
@@ -342,11 +389,13 @@ require_once '../includes/header.php';
         </form>
         <hr style="border-color:var(--border-color);margin:24px 0">
         <h3>Các bài trắc nghiệm đã tạo</h3>
-        <div class="quiz-list">
+        <?php if($quizzes):?><div class="quiz-sort-help"><i class='bx bx-move-vertical'></i> Kéo biểu tượng bên phải để đổi thứ tự nhanh</div><?php endif;?>
+        <div class="quiz-list" id="quiz-sort-list" data-course-id="<?php echo $courseId;?>">
             <?php foreach($quizzes as $listIndex=>$item):?>
-                <div class="quiz-list-item <?php echo (int)$quizId===(int)$item['id']?'active':'';?>">
+                <div class="quiz-list-item <?php echo (int)$quizId===(int)$item['id']?'active':'';?>" data-quiz-id="<?php echo (int)$item['id'];?>">
+                    <button type="button" class="quiz-drag-handle" draggable="true" title="Giữ và kéo để đổi thứ tự" aria-label="Kéo để đổi thứ tự"><i class='bx bx-grid-vertical'></i></button>
                     <a class="quiz-list-link" href="?course_id=<?php echo $courseId;?>&quiz_id=<?php echo (int)$item['id'];?>">
-                        <strong><?php echo $listIndex+1;?>. <?php echo htmlspecialchars($item['title']);?></strong>
+                        <strong><span class="quiz-order-number"><?php echo $listIndex+1;?></span>. <?php echo htmlspecialchars($item['title']);?></strong>
                         <div class="quiz-meta"><?php echo (int)$item['question_count'];?> câu · <?php echo $item['is_published']?'Đã mở':'Bản nháp';?></div>
                     </a>
                     <div class="quiz-list-actions">
@@ -359,6 +408,7 @@ require_once '../includes/header.php';
             <?php endforeach;?>
             <?php if(!$quizzes):?><p class="quiz-meta">Chưa có bài trắc nghiệm.</p><?php endif;?>
         </div>
+        <div class="quiz-sort-status" id="quiz-sort-status" aria-live="polite"></div>
     </aside>
     <main>
     <?php if($quiz):?>
@@ -372,15 +422,18 @@ require_once '../includes/header.php';
                     <div class="form-group"><label>Thời gian (phút)</label><input type="number" name="duration_minutes" value="<?php echo (int)$quiz['duration_minutes'];?>" min="1" max="600"></div>
                     <div class="form-group"><label>Số lượt làm tối đa (0 = không giới hạn)</label><input type="number" name="max_attempts" value="<?php echo (int)($quiz['max_attempts']??0);?>" min="0" max="100"></div>
                     <div class="form-group"><label>Số câu mỗi lượt (0 = tất cả)</label><input type="number" name="question_limit" value="<?php echo (int)($quiz['question_limit']??0);?>" min="0" max="1000"></div>
+                    <div class="form-group"><label>Điểm đạt (thang 10)</label><input type="number" name="passing_score" value="<?php echo htmlspecialchars((string)($quiz['passing_score']??5));?>" min="0" max="10" step="0.1"></div>
                     <div class="form-group"><label>Mở từ</label><input type="datetime-local" name="available_from" value="<?php echo !empty($quiz['available_from'])?date('Y-m-d\\TH:i',strtotime($quiz['available_from'])):'';?>"></div>
                     <div class="form-group"><label>Đóng lúc</label><input type="datetime-local" name="available_until" value="<?php echo !empty($quiz['available_until'])?date('Y-m-d\\TH:i',strtotime($quiz['available_until'])):'';?>"></div>
                     <div class="quiz-toggle-grid">
                         <label class="quiz-toggle"><input type="checkbox" name="shuffle_questions" <?php echo !empty($quiz['shuffle_questions'])?'checked':'';?>> <span>Đảo câu hỏi</span></label>
                         <label class="quiz-toggle"><input type="checkbox" name="shuffle_options" <?php echo !empty($quiz['shuffle_options'])?'checked':'';?>> <span>Đảo đáp án</span></label>
                         <label class="quiz-toggle"><input type="checkbox" name="is_published" <?php echo $quiz['is_published']?'checked':'';?>> <span>Mở cho học viên làm</span></label>
+                        <label class="quiz-toggle"><input type="checkbox" name="require_fullscreen" <?php echo !empty($quiz['require_fullscreen'])?'checked':'';?>> <span>Yêu cầu toàn màn hình</span></label>
+                        <label class="quiz-toggle"><input type="checkbox" name="limit_device" <?php echo !empty($quiz['limit_device'])?'checked':'';?>> <span>Giới hạn một thiết bị</span></label>
                     </div>
                 </div>
-                <div class="inline-actions"><button class="btn btn-primary">Lưu thông tin</button></div>
+                <div class="inline-actions"><button class="btn btn-primary">Lưu thông tin</button><a class="btn btn-outline" href="quiz_preview.php?id=<?php echo $quizId;?>"><i class='bx bx-show'></i> Xem trước đề</a></div>
             </form>
         </section>
         <section class="box" style="margin-bottom:18px;border-color:rgba(56,189,248,.3)">
@@ -428,14 +481,95 @@ require_once '../includes/header.php';
         <section class="box" style="margin-bottom:18px">
             <h3 style="margin-top:0"><i class='bx bx-bar-chart-alt-2'></i> Kết quả học viên (<?php echo count($attempts);?> lượt)</h3>
             <div style="overflow-x:auto"><table>
-                <thead><tr><th>Học viên</th><th>Số câu đúng</th><th>Điểm</th><th>Thời gian nộp</th></tr></thead>
+                <thead><tr><th>Học viên</th><th>Số câu đúng</th><th>Điểm</th><th>Cảnh báo</th><th>Thời gian nộp</th></tr></thead>
                 <tbody>
-                <?php foreach($attempts as $attempt):?><tr><td><strong><?php echo htmlspecialchars($attempt['student_name']);?></strong><small style="display:block;color:var(--text-muted)"><?php echo htmlspecialchars($attempt['student_email']);?></small></td><td><?php echo (int)$attempt['correct_count'];?>/<?php echo (int)$attempt['total_questions'];?></td><td><strong style="color:var(--success)"><?php echo htmlspecialchars($attempt['score']);?>/10</strong></td><td><?php echo date('d/m/Y H:i',strtotime($attempt['submitted_at']));?></td></tr><?php endforeach;?>
-                <?php if(!$attempts):?><tr><td colspan="4" style="text-align:center;color:var(--text-muted)">Chưa có học viên hoàn thành bài này.</td></tr><?php endif;?>
+                <?php foreach($attempts as $attempt):?><tr><td><strong><?php echo htmlspecialchars($attempt['student_name']);?></strong><small style="display:block;color:var(--text-muted)"><?php echo htmlspecialchars($attempt['student_email']);?></small></td><td><?php echo (int)$attempt['correct_count'];?>/<?php echo (int)$attempt['total_questions'];?></td><td><strong style="color:<?php echo (float)$attempt['score']>=(float)($quiz['passing_score']??5)?'var(--success)':'var(--danger)';?>"><?php echo htmlspecialchars($attempt['score']);?>/10</strong></td><td><small>Chuyển tab: <?php echo (int)($attempt['tab_switch_count']??0);?></small><small>Thoát toàn màn hình: <?php echo (int)($attempt['fullscreen_exit_count']??0);?></small><small>Mất mạng: <?php echo (int)($attempt['offline_count']??0);?></small></td><td><?php echo date('d/m/Y H:i',strtotime($attempt['submitted_at']));?></td></tr><?php endforeach;?>
+                <?php if(!$attempts):?><tr><td colspan="5" style="text-align:center;color:var(--text-muted)">Chưa có học viên hoàn thành bài này.</td></tr><?php endif;?>
                 </tbody>
             </table></div>
         </section>
     <?php else:?><div class="box empty-state">Chọn một bài trắc nghiệm bên trái hoặc tạo bài mới.</div><?php endif;?>
     </main>
 </div>
+<script>
+(() => {
+    const list = document.getElementById('quiz-sort-list');
+    const status = document.getElementById('quiz-sort-status');
+    if (!list || list.children.length < 2) return;
+
+    let draggedItem = null;
+    let originalOrder = [];
+
+    const items = () => [...list.querySelectorAll('.quiz-list-item')];
+    const ids = () => items().map(item => Number(item.dataset.quizId));
+    const updateNumbers = () => items().forEach((item, index) => {
+        const number = item.querySelector('.quiz-order-number');
+        if (number) number.textContent = String(index + 1);
+    });
+    const setStatus = (message, className = '') => {
+        status.textContent = message;
+        status.className = `quiz-sort-status ${className}`.trim();
+    };
+    const restoreOrder = () => {
+        originalOrder.forEach(id => {
+            const item = list.querySelector(`[data-quiz-id="${id}"]`);
+            if (item) list.appendChild(item);
+        });
+        updateNumbers();
+    };
+    const saveOrder = async () => {
+        const formData = new FormData();
+        formData.append('csrf_token', document.querySelector('meta[name="csrf-token"]')?.content || '');
+        formData.append('action', 'reorder_quizzes');
+        formData.append('course_id', list.dataset.courseId);
+        formData.append('quiz_ids', JSON.stringify(ids()));
+        setStatus('Đang lưu thứ tự...', 'saving');
+        try {
+            const response = await fetch(window.location.href, {
+                method: 'POST',
+                headers: {'X-Requested-With': 'XMLHttpRequest'},
+                body: formData
+            });
+            const result = await response.json();
+            if (!response.ok || !result.success) throw new Error(result.message || 'Không thể lưu thứ tự.');
+            originalOrder = ids();
+            setStatus('Đã lưu thứ tự mới.', 'saved');
+            window.setTimeout(() => setStatus(''), 1800);
+        } catch (error) {
+            restoreOrder();
+            setStatus(error.message || 'Không thể lưu thứ tự.', 'error');
+        }
+    };
+
+    list.querySelectorAll('.quiz-drag-handle').forEach(handle => {
+        handle.addEventListener('dragstart', event => {
+            draggedItem = handle.closest('.quiz-list-item');
+            originalOrder = ids();
+            draggedItem.classList.add('dragging');
+            event.dataTransfer.effectAllowed = 'move';
+            event.dataTransfer.setData('text/plain', draggedItem.dataset.quizId);
+        });
+        handle.addEventListener('dragend', () => {
+            if (!draggedItem) return;
+            draggedItem.classList.remove('dragging');
+            items().forEach(item => item.classList.remove('drag-over'));
+            updateNumbers();
+            if (JSON.stringify(originalOrder) !== JSON.stringify(ids())) saveOrder();
+            draggedItem = null;
+        });
+    });
+
+    list.addEventListener('dragover', event => {
+        if (!draggedItem) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'move';
+        const siblings = items().filter(item => item !== draggedItem);
+        const next = siblings.find(item => event.clientY < item.getBoundingClientRect().top + item.offsetHeight / 2);
+        if (next) list.insertBefore(draggedItem, next);
+        else list.appendChild(draggedItem);
+        items().forEach(item => item.classList.toggle('drag-over', item === next));
+    });
+    list.addEventListener('drop', event => event.preventDefault());
+})();
+</script>
 <?php require_once '../includes/footer.php'; ?>

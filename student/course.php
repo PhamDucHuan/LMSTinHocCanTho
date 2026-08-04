@@ -112,11 +112,12 @@ require_once '../includes/header.php';
         <h1 style="margin:0;"><?php echo htmlspecialchars($course['title']); ?></h1>
     </div>
     <div class="course-detail-actions">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;">
+        <?php if ((int) $course['quiz_count'] > 0): ?>
+            <a href="<?php echo htmlspecialchars(friendlyUrl('quizzes.php','course',$course['slug'])); ?>" class="btn btn-outline"><i class='bx bx-list-check'></i> Làm trắc nghiệm</a>
+        <?php endif; ?>
         <?php if ((int) $course['is_enrolled'] === 1): ?>
-            <div style="display:flex;gap:10px;flex-wrap:wrap;">
-                <a href="<?php echo htmlspecialchars(friendlyUrl('assignments.php','course',$course['slug'])); ?>" class="btn btn-primary"><i class='bx bx-book-open'></i> Xem bài tập</a>
-                <a href="<?php echo htmlspecialchars(friendlyUrl('quizzes.php','course',$course['slug'])); ?>" class="btn btn-outline"><i class='bx bx-list-check'></i> Làm trắc nghiệm</a>
-            </div>
+            <a href="<?php echo htmlspecialchars(friendlyUrl('assignments.php','course',$course['slug'])); ?>" class="btn btn-primary"><i class='bx bx-book-open'></i> Xem bài tập / bài thi</a>
         <?php elseif (($course['request_status'] ?? '') === 'pending'): ?>
             <button type="button" class="btn" disabled style="background:rgba(245,158,11,.16);color:#fbbf24;border:1px solid rgba(245,158,11,.3);"><i class='bx bx-time-five'></i> Đang chờ duyệt</button>
         <?php else: ?>
@@ -125,6 +126,7 @@ require_once '../includes/header.php';
                 <button type="submit" class="btn btn-primary"><i class='bx bx-user-plus'></i> <?php echo ($course['request_status'] ?? '') === 'rejected' ? 'Gửi yêu cầu lại' : 'Đăng ký tham gia'; ?></button>
             </form>
         <?php endif; ?>
+        </div>
     </div>
 </div>
 

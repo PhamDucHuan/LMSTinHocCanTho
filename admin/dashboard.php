@@ -8,6 +8,11 @@ if (!isset($_SESSION['user_id']) || $_SESSION['user_role'] !== 'admin') {
     exit;
 }
 
+// Check database connection
+if (!isset($pdo) || $pdo === null) {
+    die('Database connection failed');
+}
+
 // Lấy thống kê tổng quan
 $stats = [
     'students' => $pdo->query("SELECT COUNT(*) FROM users WHERE role = 'student'")->fetchColumn(),

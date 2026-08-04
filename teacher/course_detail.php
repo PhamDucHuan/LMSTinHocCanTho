@@ -1,5 +1,6 @@
 <?php
 require_once '../includes/security.php';
+require_once '../includes/authorization.php';
 secureSessionStart();
 require_once '../config/database.php';
 require_once '../includes/quiz_schema.php';
@@ -15,11 +16,7 @@ ensureQuizSchema($pdo);
 
 $course_id = $_GET['id'] ?? 0;
 
-$ownerCheck = $_SESSION['user_role'] === 'admin'
-    ? $pdo->prepare("SELECT id, title FROM courses WHERE id = ?")
-    : $pdo->prepare("SELECT id, title FROM courses WHERE id = ? AND teacher_id = ?");
-$ownerCheck->execute($_SESSION['user_role'] === 'admin' ? [$course_id] : [$course_id, $_SESSION['user_id']]);
-$ownedCourse = $ownerCheck->fetch();
+$ownedCourse = authorizationFindManageableCourse($pdo, (int) $course_id, (string) $_SESSION['user_role'], (int) $_SESSION['user_id']);
 if (!$ownedCourse) {
     http_response_code(404); exit('Khóa học không tồn tại hoặc bạn không có quyền truy cập.');
 }
@@ -114,14 +111,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'remov
 }
 
 // Fetch thông tin khóa học
-if ($_SESSION['user_role'] === 'admin') {
-    $stmt = $pdo->prepare("SELECT * FROM courses WHERE id = ?");
-    $stmt->execute([$course_id]);
-} else {
-    $stmt = $pdo->prepare("SELECT * FROM courses WHERE id = ? AND teacher_id = ?");
-    $stmt->execute([$course_id, $_SESSION['user_id']]);
-}
-$course = $stmt->fetch();
+$course = $ownedCourse;
 
 if (!$course) {
     die("Khóa học không tồn tại.");
