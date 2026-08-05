@@ -1,4 +1,5 @@
 const qualitativePattern = /\b(đẹp|hợp lý|sáng tạo|cân đối|chuyên nghiệp|dễ đọc|thẩm mỹ|ấn tượng)\b/i;
+const colorPattern = /\b(màu|mau|color|colour|font color|fill|background|nền|to màu|tô màu)\b/i;
 
 function roundScore(value) {
   return Math.round(Number(value) * 100) / 100;
@@ -12,6 +13,7 @@ export function normalizeRubric({ rubric, rubricId, aiCriteria, moduleName, maxS
       max_score: roundScore(criterion.max_score),
       verification_type: ['rule', 'ai_review', 'mixed'].includes(criterion.verification_type) ? criterion.verification_type : 'ai_review',
       verification: criterion.verification && typeof criterion.verification === 'object' ? criterion.verification : {},
+      grading_policy: colorPattern.test(String(criterion.description || '')) ? 'ignore_color_differences' : 'standard',
     }));
     const total = roundScore(criteria.reduce((sum, criterion) => sum + criterion.max_score, 0));
     if (!criteria.length || criteria.some(criterion => !criterion.description || criterion.max_score <= 0)) {
@@ -39,6 +41,7 @@ export function normalizeRubric({ rubric, rubricId, aiCriteria, moduleName, maxS
       max_score: score,
       verification_type: qualitativePattern.test(description) ? 'ai_review' : 'ai_review',
       verification: {},
+      grading_policy: colorPattern.test(description) ? 'ignore_color_differences' : 'standard',
       confidence: 0.5,
     };
   });

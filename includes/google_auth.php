@@ -3,6 +3,7 @@ require_once __DIR__ . '/security.php';
 require_once __DIR__ . '/remember_login.php';
 secureSessionStart();
 require_once '../config/database.php';
+require_once __DIR__ . '/account_lock.php';
 
 // Tệp xử lý đăng nhập bằng Google
 // Tính năng này đang được thiết lập mô phỏng. Bắt buộc phải có Client ID từ Google Cloud.
@@ -39,6 +40,12 @@ if (isset($_GET['code'])) {
     $stmt->execute([$google_id, $email]);
     $user = $stmt->fetch();
     
+    if ($user && isAccountLocked($pdo, (int) $user['id'])) {
+        $_SESSION['error'] = 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.';
+        header('Location: ../index.php');
+        exit;
+    }
+
     if($user) {
         // Liên kết Google và làm mới avatar vì người dùng có thể đổi ảnh Google.
         $update = $pdo->prepare("UPDATE users SET google_id = COALESCE(NULLIF(google_id, ''), ?), avatar_url = ? WHERE id = ?");

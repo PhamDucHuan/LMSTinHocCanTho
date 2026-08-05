@@ -19,8 +19,8 @@ if (!empty($_SESSION['user_id'])) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Đăng Nhập | LMS Tin Học</title>
-    <link rel="icon" type="image/png" sizes="512x512" href="assets/images/3.png?v=2">
-    <link rel="apple-touch-icon" href="assets/images/3.png?v=2">
+    <link rel="icon" type="image/png" href="assets/images/LOGO1.png?v=3">
+    <link rel="apple-touch-icon" href="assets/images/LOGO1.png?v=3">
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <!-- Custom CSS -->

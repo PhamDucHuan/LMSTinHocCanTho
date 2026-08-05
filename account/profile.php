@@ -27,7 +27,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (!empty($new_password)) {
             $current_password = $_POST['current_password'] ?? '';
-            if (empty($user['password_hash']) || !password_verify($current_password, $user['password_hash'])) {
+            $hasLocalPassword = !empty($user['password_hash']);
+            $isGoogleAccount = !empty($user['google_id']);
+            if (!$hasLocalPassword && !$isGoogleAccount) {
+                $error = "Tài khoản chưa đủ điều kiện để đặt mật khẩu.";
+            } elseif ($hasLocalPassword && !password_verify($current_password, $user['password_hash'])) {
                 $error = "Mật khẩu hiện tại không đúng.";
             } elseif (strlen($new_password) < 8) {
                 $error = "Mật khẩu mới phải có ít nhất 8 ký tự.";
@@ -92,12 +96,19 @@ require_once '../includes/header.php';
         </div>
 
         <hr style="border: none; border-top: 1px solid rgba(255,255,255,0.05); margin: 25px 0;">
-        <h4 style="margin-top: 0; margin-bottom: 20px; color: var(--text-muted);">Đổi mật khẩu</h4>
+        <h4 id="lms-password" style="margin-top: 0; margin-bottom: 20px; color: var(--text-muted);scroll-margin-top:20px"><?php echo empty($user['password_hash'])?'Đặt mật khẩu LMS':'Đổi mật khẩu';?></h4>
 
+        <?php if (!empty($user['password_hash'])): ?>
         <div class="form-group">
             <label><i class='bx bx-key'></i> Mật khẩu hiện tại</label>
             <input type="password" name="current_password" autocomplete="current-password">
         </div>
+        <?php else: ?>
+        <div style="padding:13px 15px;margin-bottom:18px;border:1px solid rgba(var(--primary-rgb),.25);border-radius:10px;background:rgba(var(--primary-rgb),.08);color:var(--text-muted);line-height:1.5">
+            <i class='bx bxl-google' style="color:var(--primary)"></i>
+            Bạn đăng nhập bằng Google nên chưa có mật khẩu LMS. Hãy đặt mật khẩu mới bên dưới; không cần nhập mật khẩu cũ.
+        </div>
+        <?php endif; ?>
 
         <div class="form-group">
             <label><i class='bx bx-lock-alt'></i> Mật khẩu mới</label>

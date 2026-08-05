@@ -21,7 +21,10 @@ function createDatabaseConnection(): PDO
 }
 
 try {
-    $pdo = createDatabaseConnection();
+    if (!isset($GLOBALS['pdo']) || !$GLOBALS['pdo'] instanceof PDO) {
+        $GLOBALS['pdo'] = createDatabaseConnection();
+    }
+    $pdo = $GLOBALS['pdo'];
 } catch (\PDOException $e) {
     error_log('Database connection failed: ' . $e->getMessage());
     throw new \RuntimeException('Không thể kết nối cơ sở dữ liệu.');

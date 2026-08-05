@@ -69,7 +69,7 @@ if (!$assignment_id) {
 
     if ($_SESSION['user_role'] === 'admin') {
         $overviewStmt = $pdo->query(
-            "SELECT a.id, a.title, a.type, a.course_id, c.title course_name,
+            "SELECT a.id, a.title, a.type, a.course_id, a.priority_order, a.created_at, c.title course_name,
                     COUNT(s.id) submission_count,
                     SUM(CASE WHEN s.grading_status='review_required' THEN 1 ELSE 0 END) review_count,
                     GROUP_CONCAT(DISTINCT u.name ORDER BY u.name SEPARATOR '||') submitter_names,
@@ -79,12 +79,12 @@ if (!$assignment_id) {
              LEFT JOIN courses c ON c.id=a.course_id
              LEFT JOIN submissions s ON s.assignment_id=a.id
              LEFT JOIN users u ON u.id=s.student_id
-             GROUP BY a.id, a.title, a.type, a.course_id, c.title
-             ORDER BY MAX(s.submitted_at) DESC, a.id DESC"
+             GROUP BY a.id, a.title, a.type, a.course_id, a.priority_order, a.created_at, c.title
+             ORDER BY c.title, a.priority_order, a.created_at, a.id"
         );
     } else {
         $overviewStmt = $pdo->prepare(
-            "SELECT a.id, a.title, a.type, a.course_id, c.title course_name,
+            "SELECT a.id, a.title, a.type, a.course_id, a.priority_order, a.created_at, c.title course_name,
                     COUNT(s.id) submission_count,
                     SUM(CASE WHEN s.grading_status='review_required' THEN 1 ELSE 0 END) review_count,
                     GROUP_CONCAT(DISTINCT u.name ORDER BY u.name SEPARATOR '||') submitter_names,
@@ -95,8 +95,8 @@ if (!$assignment_id) {
              LEFT JOIN submissions s ON s.assignment_id=a.id
              LEFT JOIN users u ON u.id=s.student_id
              WHERE a.teacher_id=?
-             GROUP BY a.id, a.title, a.type, a.course_id, c.title
-             ORDER BY MAX(s.submitted_at) DESC, a.id DESC"
+             GROUP BY a.id, a.title, a.type, a.course_id, a.priority_order, a.created_at, c.title
+             ORDER BY c.title, a.priority_order, a.created_at, a.id"
         );
         $overviewStmt->execute([(int) $_SESSION['user_id']]);
     }
@@ -306,6 +306,12 @@ if (!$assignment_id) {
         .submission-student-chips{display:flex;gap:6px;flex-wrap:wrap;max-height:82px;overflow-y:auto;padding-right:3px}
         .submission-student-chips span{display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;background:rgba(var(--primary-rgb),.12);color:var(--text-main);border:1px solid rgba(var(--primary-rgb),.2)}
         .submission-assignment-card .btn{margin-top:auto;justify-content:center}
+        .submission-type-group.exam .submission-assignment-card{gap:9px;padding:14px;min-height:0}
+        .submission-type-group.exam .submission-assignment-card>div:first-child{min-height:0}
+        .submission-type-group.exam .submission-assignment-card h3{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden;font-size:18px}
+        .submission-type-group.exam .submission-students{gap:6px;padding-top:8px}
+        .submission-type-group.exam .submission-student-chips{max-height:38px;overflow:hidden}
+        .submission-type-group.exam .submission-assignment-card .btn{min-height:42px;padding:9px 12px}
         @media(max-width:900px){.submission-overview-head{grid-template-columns:1fr}.submission-filter{justify-self:stretch}}
         @media(max-width:650px){.submission-course>summary{align-items:flex-start;flex-direction:column}.submission-type-groups{padding:12px}.submission-type-heading{align-items:flex-start;flex-direction:column}.submission-assignment-grid{grid-template-columns:1fr}.submission-assignment-card>div:first-child{min-height:0}.submission-filter{grid-template-columns:1fr}.submission-filter,.submission-filter label,.submission-filter select,.submission-filter .btn{width:100%}.submission-filter .btn{transform:none}}
     </style>

@@ -148,7 +148,11 @@ function deleteFromDrive($fileId) {
     try {
         $client = getDriveClient();
         $service = new Google_Service_Drive($client);
-        $service->files->delete($fileId);
+        if (filter_var(envValue('GOOGLE_DRIVE_PERMANENT_DELETE', 'false'), FILTER_VALIDATE_BOOLEAN)) {
+            $service->files->delete($fileId);
+        } else {
+            $service->files->update($fileId, new Google_Service_Drive_DriveFile(['trashed' => true]));
+        }
         return true;
     } catch (Exception $e) {
         error_log("Lỗi xóa file khỏi Drive ($fileId): " . $e->getMessage());

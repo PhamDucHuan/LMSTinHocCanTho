@@ -13,13 +13,15 @@ function loadEnvironmentFile(string $path): void
         }
 
         [$name, $value] = array_map('trim', explode('=', $line, 2));
-        if ($name === '' || getenv($name) !== false) {
+        if ($name === '') {
             continue;
         }
 
         if (strlen($value) >= 2 && (($value[0] === '"' && substr($value, -1) === '"') || ($value[0] === "'" && substr($value, -1) === "'"))) {
             $value = substr($value, 1, -1);
         }
+        // File .env của chính dự án là nguồn cấu hình nhất quán cho cả Apache,
+        // CLI và tác vụ nền. Ghi đè biến cũ mà tiến trình XAMPP có thể đã giữ.
         putenv($name . '=' . $value);
         $_ENV[$name] = $value;
     }

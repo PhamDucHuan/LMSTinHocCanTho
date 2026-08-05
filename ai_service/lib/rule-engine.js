@@ -37,6 +37,17 @@ function result(criterion, passed, evidence, message, unsupported = false) {
   };
 }
 
+function colorAdvisoryResult(criterion, verificationType, matches, evidence = {}) {
+  return result(criterion, true, {
+    policy: 'ignore_color_differences',
+    ignored_verification: verificationType,
+    color_warning: !matches,
+    ...evidence,
+  }, matches
+    ? 'Màu sắc đúng yêu cầu tham khảo; tiêu chí được đủ điểm.'
+    : 'Cảnh báo: màu sắc khác yêu cầu tham khảo nhưng không bị trừ điểm.');
+}
+
 function selectWordParagraph(document, selector = {}) {
   if (Number.isInteger(selector.index)) return document.paragraphs?.[selector.index] || null;
   return document.paragraphs?.find(paragraph =>
@@ -86,7 +97,6 @@ function evaluateExcel(criterion, document) {
       return result(criterion, passed, { expected_merge: verification.range, actual_merges: sheet?.merged_cells || [] }, passed ? 'Merge chính xác.' : 'Thiếu vùng merge yêu cầu.');
     }
     case 'excel_font':
-    case 'excel_fill':
     case 'excel_border':
     case 'excel_alignment':
     case 'excel_number_format': {
@@ -97,6 +107,14 @@ function evaluateExcel(criterion, document) {
         return Object.entries(typeof expected === 'object' ? expected : { value: expected }).some(([key, value]) => String(key === 'value' ? actual : actual?.[key]).toLowerCase() !== String(value).toLowerCase());
       });
       return result(criterion, failures.length === 0 && addresses.length > 0, { range: verification.range, expected, failed_cells: failures }, failures.length ? `Định dạng ${property} chưa đúng.` : `Định dạng ${property} chính xác.`);
+    }
+    case 'excel_fill': {
+      const expected = verification.expected || {};
+      const failures = addresses.filter(address => {
+        const actual = sheet?.cells?.[address]?.style?.fill;
+        return Object.entries(typeof expected === 'object' ? expected : { value: expected }).some(([key, value]) => String(key === 'value' ? actual : actual?.[key]).toLowerCase() !== String(value).toLowerCase());
+      });
+      return colorAdvisoryResult(criterion, verification.type, failures.length === 0 && addresses.length > 0, { range: verification.range, expected, failed_cells: failures });
     }
     case 'excel_row_height': {
       const row = sheet?.rows?.find(item => item.index === Number(verification.row));
@@ -128,6 +146,11 @@ function evaluateWord(criterion, document) {
     word_style_name: 'style_name', word_font_family: 'font_family', word_font_size: 'font_size', word_bold: 'bold',
     word_italic: 'italic', word_underline: 'underline', word_font_color: 'font_color', word_alignment: 'alignment',
   }[verification.type];
+  if (verification.type === 'word_font_color') {
+    const expectedValue = expected.font_color ?? verification.expected_value;
+    const matches = Boolean(paragraph) && String(actual.font_color).toLowerCase() === String(expectedValue).toLowerCase();
+    return colorAdvisoryResult(criterion, verification.type, matches, { selector: verification.selector, expected: expectedValue, actual: actual.font_color ?? null });
+  }
   if (formatRule) {
     const expectedValue = expected[formatRule] ?? verification.expected_value;
     const passed = paragraph && String(actual[formatRule]).toLowerCase() === String(expectedValue).toLowerCase();
@@ -183,12 +206,16 @@ function evaluatePowerPoint(criterion, document) {
     }
     case 'ppt_font_family':
     case 'ppt_font_size':
-    case 'ppt_font_color':
     case 'ppt_bold': {
       const property = verification.type.replace('ppt_', '');
       const actual = object?.formatting?.[property];
       const passed = object && String(actual).toLowerCase() === String(verification.expected).toLowerCase();
       return result(criterion, passed, { expected: verification.expected, actual: actual ?? null }, passed ? 'Định dạng chính xác.' : 'Định dạng chưa đúng.');
+    }
+    case 'ppt_font_color': {
+      const actual = object?.formatting?.font_color;
+      const matches = Boolean(object) && String(actual).toLowerCase() === String(verification.expected).toLowerCase();
+      return colorAdvisoryResult(criterion, verification.type, matches, { expected: verification.expected, actual: actual ?? null });
     }
     case 'ppt_object_position':
     case 'ppt_object_size': {

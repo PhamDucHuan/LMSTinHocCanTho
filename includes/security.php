@@ -3,13 +3,19 @@ require_once __DIR__ . '/../config/env.php';
 
 function secureSessionStart(): void
 {
-    if (session_status() === PHP_SESSION_ACTIVE) return;
-    session_set_cookie_params([
-        'lifetime' => 0, 'path' => '/',
-        'secure' => (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off'),
-        'httponly' => true, 'samesite' => 'Lax',
-    ]);
-    session_start();
+    if (session_status() !== PHP_SESSION_ACTIVE) {
+        session_set_cookie_params([
+            'lifetime' => 0, 'path' => '/',
+            'secure' => (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off'),
+            'httponly' => true, 'samesite' => 'Lax',
+        ]);
+        session_start();
+    }
+    if (!empty($_SESSION['user_id'])) {
+        require_once __DIR__ . '/../config/database.php';
+        require_once __DIR__ . '/account_lock.php';
+        terminateLockedAccountSession($GLOBALS['pdo']);
+    }
 }
 
 function csrfToken(): string

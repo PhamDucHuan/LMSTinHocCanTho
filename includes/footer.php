@@ -167,6 +167,21 @@
             const sidebarToggleClose = document.getElementById('sidebar-toggle-close');
             const sidebar = document.querySelector('.sidebar');
             const mainContent = document.getElementById('main-content');
+
+            document.querySelectorAll('[data-sidebar-group]').forEach(group => {
+                const key = `lms_sidebar_group_${group.dataset.sidebarGroup}`;
+                const toggle = group.querySelector('.sidebar-group-toggle');
+                const saved = localStorage.getItem(key);
+                const collapsed = saved === null ? !group.classList.contains('has-active') : saved === 'collapsed';
+                group.classList.toggle('collapsed', collapsed);
+                toggle?.setAttribute('aria-expanded', String(!collapsed));
+                toggle?.addEventListener('click', () => {
+                    const willCollapse = !group.classList.contains('collapsed');
+                    group.classList.toggle('collapsed', willCollapse);
+                    toggle.setAttribute('aria-expanded', String(!willCollapse));
+                    localStorage.setItem(key, willCollapse ? 'collapsed' : 'expanded');
+                });
+            });
             
             if (sidebar && mainContent) {
                 const mobileSidebar = window.matchMedia('(max-width: 900px)');

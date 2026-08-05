@@ -2,6 +2,7 @@
 require_once __DIR__ . '/security.php';
 secureSessionStart();
 require_once '../config/database.php';
+require_once __DIR__ . '/account_lock.php';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verifyCsrfToken();
@@ -60,6 +61,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt->execute([$email]);
         $user = $stmt->fetch();
 
+        if ($user && isAccountLocked($pdo, (int) $user['id'])) {
+            $_SESSION['error'] = 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.';
+            header('Location: ../index.php');
+            exit;
+        }
+
         if ($user && password_verify($password, $user['password_hash'])) {
             session_regenerate_id(true);
             $_SESSION['user_id'] = $user['id'];
@@ -67,7 +74,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['user_role'] = $user['role'];
             $_SESSION['user_avatar'] = $user['avatar_url'] ?? null;
 
-            if ($user['role'] === 'teacher') {
+            if ($user['role'] === 'admin') {
+                header('Location: ../admin/dashboard.php');
+            } elseif ($user['role'] === 'teacher') {
                 header('Location: ../teacher/dashboard.php');
             } else {
                 header('Location: ../student/dashboard.php');

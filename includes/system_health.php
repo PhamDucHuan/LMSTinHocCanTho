@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__.'/backup_manager.php';
 
 function systemHealthItem(string $name, string $status, string $message, string $detail = ''): array
 {
@@ -92,6 +93,15 @@ function collectSystemHealth(PDO $pdo, string $projectRoot): array
     $checks[] = is_file($envPath) && is_readable($envPath)
         ? systemHealthItem('Tệp môi trường', 'ok', '.env tồn tại và có thể đọc')
         : systemHealthItem('Tệp môi trường', 'error', 'Không tìm thấy hoặc không đọc được .env', 'Tạo .env tại thư mục gốc dự án.');
+
+    try {
+        $databaseBackups=listBackups();$latestBackup=$databaseBackups[0]['created_at']??null;
+        $backupStatus=$latestBackup&&$latestBackup>=time()-172800?'ok':'warning';
+        $backupMessage=$latestBackup?'Bản gần nhất: '.date('d/m/Y H:i',$latestBackup):'Chưa có bản sao lưu database';
+        $checks[]=systemHealthItem('Sao lưu dữ liệu',$backupStatus,$backupMessage,'Hệ thống giữ tối đa 5 bản và cảnh báo khi quá 2 ngày chưa sao lưu.');
+    } catch(Throwable $error) {
+        $checks[]=systemHealthItem('Sao lưu dữ liệu','error','Không thể truy cập thư mục sao lưu',$error->getMessage());
+    }
 
     $environmentGroups = [
         ['Cấu hình ứng dụng', 'error', ['APP_URL', 'APP_KEY', 'DB_HOST', 'DB_NAME', 'DB_USER'], 'Ứng dụng có thể không hoạt động ổn định.'],

@@ -91,3 +91,28 @@ test('PowerPoint rules use parsed animation and transition timing evidence', () 
   const results = evaluateRuleCriteria(rubric, document);
   assert.deepEqual(results.map(item => item.status), ['passed', 'passed']);
 });
+
+test('color differences never reduce functional grading scores', () => {
+  const cases = [
+    {
+      rubric: { criteria: [{ id: 'excel-color', description: 'Tô màu đỏ', max_score: 2, verification_type: 'rule', verification: { type: 'excel_fill', sheet: 'Sheet1', range: 'A1', expected: { color: 'FF0000' } } }] },
+      document: { type: 'excel', sheets: [{ name: 'Sheet1', cells: { A1: { value: 'x', style: { fill: { color: '00FF00' } } } } }] },
+    },
+    {
+      rubric: { criteria: [{ id: 'word-color', description: 'Màu chữ xanh', max_score: 2, verification_type: 'rule', verification: { type: 'word_font_color', selector: { index: 0 }, expected_value: '0000FF' } }] },
+      document: { type: 'word', paragraphs: [{ text: 'Nội dung', runs: [{ text: 'Nội dung', color: 'FF0000' }] }] },
+    },
+    {
+      rubric: { criteria: [{ id: 'ppt-color', description: 'Màu chữ vàng', max_score: 2, verification_type: 'rule', verification: { type: 'ppt_font_color', slide: 1, selector: { text_contains: 'Tiêu đề' }, expected: 'FFFF00' } }] },
+      document: { type: 'powerpoint', slides: [{ objects: [{ text: 'Tiêu đề', formatting: { font_color: '000000' } }] }] },
+    },
+  ];
+  for (const item of cases) {
+    const [result] = evaluateRuleCriteria(item.rubric, item.document);
+    assert.equal(result.status, 'passed');
+    assert.equal(result.score, 2);
+    assert.equal(result.evidence.policy, 'ignore_color_differences');
+    assert.equal(result.evidence.color_warning, true);
+    assert.match(result.message, /Cảnh báo/);
+  }
+});

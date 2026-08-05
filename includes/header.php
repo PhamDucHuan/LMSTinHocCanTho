@@ -22,8 +22,8 @@ if (isset($pdo) && $pdo instanceof PDO && !empty($_SESSION['user_id'])) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="<?php echo htmlspecialchars(csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
     <title><?php echo htmlspecialchars($page_title); ?></title>
-    <link rel="icon" type="image/png" sizes="512x512" href="../assets/images/3.png?v=2">
-    <link rel="apple-touch-icon" href="../assets/images/3.png?v=2">
+    <link rel="icon" type="image/png" href="../assets/images/LOGO1.png?v=3">
+    <link rel="apple-touch-icon" href="../assets/images/LOGO1.png?v=3">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link href='https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css' rel='stylesheet'>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -491,6 +491,22 @@ if (isset($pdo) && $pdo instanceof PDO && !empty($_SESSION['user_id'])) {
         .menu-item:hover, .menu-item.active {
             background: rgba(255,255,255,0.05); color: var(--primary); border-right: 3px solid var(--primary);
         }
+        .sidebar-group { border-bottom:1px solid var(--border-color); }
+        .sidebar-group:first-child { border-top:1px solid var(--border-color); }
+        .sidebar-group-toggle {
+            width:100%; border:0; background:transparent; color:var(--text-muted); cursor:pointer;
+            padding:12px 18px 9px; display:flex; align-items:center; gap:9px;
+            font:600 12px/1.2 'Outfit',sans-serif; letter-spacing:.08em; text-transform:uppercase;
+            transition:background .2s,color .2s;
+        }
+        .sidebar-group-toggle:hover { background:rgba(255,255,255,.035); color:var(--text-main); }
+        .sidebar-group-toggle > i:first-child { color:var(--primary); font-size:17px; }
+        .sidebar-group-toggle .group-chevron { margin-left:auto; font-size:18px; transition:transform .25s ease; }
+        .sidebar-group.collapsed .group-chevron { transform:rotate(-90deg); }
+        .sidebar-group-items { display:grid; grid-template-rows:1fr; opacity:1; transition:grid-template-rows .28s ease,opacity .2s ease; }
+        .sidebar-group-items-inner { min-height:0; overflow:hidden; padding-bottom:7px; }
+        .sidebar-group.collapsed .sidebar-group-items { grid-template-rows:0fr; opacity:0; }
+        .sidebar-group .menu-item { padding:10px 20px 10px 29px; font-size:14px; }
         
         .sidebar-footer { padding: 20px; border-top: 1px solid rgba(255,255,255,0.05); }
         .user-menu-container { position: relative; }
@@ -798,7 +814,7 @@ if (isset($pdo) && $pdo instanceof PDO && !empty($_SESSION['user_id'])) {
     <aside class="sidebar">
         <div class="sidebar-header">
             <a href="<?php echo $role === 'admin' ? '../admin/dashboard.php' : ($role === 'teacher' ? '../teacher/dashboard.php' : '../student/dashboard.php'); ?>" class="sidebar-brand" aria-label="Tin học Cần Thơ - Trang tổng quan">
-                <img src="../assets/images/logo.png" alt="Tin học Cần Thơ">
+                <img src="../assets/images/Logo2.png" alt="Tin học Cần Thơ">
             </a>
             <button id="sidebar-toggle-close" style="background: transparent; border: none; color: var(--text-muted); font-size: 28px; cursor: pointer; padding: 0; display: flex; align-items: center; justify-content: center; transition: 0.3s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='var(--text-muted)'">
                 <i class='bx bx-x'></i>
@@ -811,19 +827,28 @@ if (isset($pdo) && $pdo instanceof PDO && !empty($_SESSION['user_id'])) {
             $current_page = $parts[count($parts)-2] . '/' . $parts[count($parts)-1];
             
             if ($role === 'admin') {
-                $menus = [
-                    ['url' => '../admin/audit_logs.php', 'icon' => 'bx-history', 'label' => 'Nhật ký hoạt động', 'match' => ['admin/audit_logs.php']],
-                    ['url' => '../admin/ai_grading.php', 'icon' => 'bx-bot', 'label' => 'Giám sát chấm AI', 'match' => ['admin/ai_grading.php']],
-                    ['url' => '../admin/system_health.php', 'icon' => 'bx-pulse', 'label' => 'Tình trạng hệ thống', 'match' => ['admin/system_health.php']],
-                    ['url' => '../teacher/question_bank.php', 'icon' => 'bx-library', 'label' => 'Ngân hàng câu hỏi', 'match' => ['teacher/question_bank.php']],
-                    ['url' => '../admin/dashboard.php', 'icon' => 'bx-shield', 'label' => 'Tổng quan', 'match' => ['admin/dashboard.php']],
-                    ['url' => '../admin/users.php', 'icon' => 'bx-group', 'label' => 'Quản lý Tài khoản', 'match' => ['admin/users.php']],
-                    ['url' => '../teacher/courses.php', 'icon' => 'bx-book-open', 'label' => 'Quản lý Khóa học', 'match' => ['teacher/courses.php', 'teacher/course_detail.php', 'teacher/quizzes.php']],
-                    ['url' => '../admin/assignments.php', 'icon' => 'bx-book-content', 'label' => 'Quản lý Bài tập', 'match' => ['admin/assignments.php', 'admin/edit_assignment.php']],
-                    ['url' => '../teacher/submissions.php', 'icon' => 'bx-file-find', 'label' => 'Bài làm Học viên', 'match' => ['teacher/submissions.php']],
-                    ['url' => '../teacher/student_progress.php', 'icon' => 'bx-line-chart', 'label' => 'Tiến độ Học viên', 'match' => ['teacher/student_progress.php']],
-                    ['url' => '../teacher/create_assignment.php', 'icon' => 'bx-plus-circle', 'label' => 'Giao Bài Mới', 'match' => ['teacher/create_assignment.php']],
-                    ['url' => '../student/dashboard.php', 'icon' => 'bx-book-reader', 'label' => 'Giao diện Học viên', 'match' => ['student/dashboard.php', 'student/assignment.php', 'student/outstanding_submissions.php']]
+                $menuGroups = [
+                    ['id' => 'overview', 'label' => 'Tổng quan', 'icon' => 'bx-home-alt', 'items' => [
+                        ['url' => '../admin/dashboard.php', 'icon' => 'bx-shield', 'label' => 'Bảng điều khiển', 'match' => ['admin/dashboard.php']],
+                    ]],
+                    ['id' => 'training', 'label' => 'Quản lý đào tạo', 'icon' => 'bx-book-open', 'items' => [
+                        ['url' => '../teacher/courses.php', 'icon' => 'bx-book-open', 'label' => 'Quản lý Khóa học', 'match' => ['teacher/courses.php', 'teacher/course_detail.php', 'teacher/quizzes.php']],
+                        ['url' => '../admin/assignments.php', 'icon' => 'bx-book-content', 'label' => 'Quản lý Bài tập', 'match' => ['admin/assignments.php', 'admin/edit_assignment.php']],
+                        ['url' => '../teacher/create_assignment.php', 'icon' => 'bx-plus-circle', 'label' => 'Giao Bài Mới', 'match' => ['teacher/create_assignment.php']],
+                        ['url' => '../teacher/submissions.php', 'icon' => 'bx-file-find', 'label' => 'Bài làm Học viên', 'match' => ['teacher/submissions.php']],
+                        ['url' => '../teacher/student_progress.php', 'icon' => 'bx-line-chart', 'label' => 'Tiến độ Học viên', 'match' => ['teacher/student_progress.php']],
+                        ['url' => '../teacher/question_bank.php', 'icon' => 'bx-library', 'label' => 'Ngân hàng câu hỏi', 'match' => ['teacher/question_bank.php']],
+                    ]],
+                    ['id' => 'monitoring', 'label' => 'Theo dõi & AI', 'icon' => 'bx-line-chart', 'items' => [
+                        ['url' => '../admin/ai_grading.php', 'icon' => 'bx-bot', 'label' => 'Giám sát chấm AI', 'match' => ['admin/ai_grading.php']],
+                        ['url' => '../admin/audit_logs.php', 'icon' => 'bx-history', 'label' => 'Nhật ký hoạt động', 'match' => ['admin/audit_logs.php']],
+                    ]],
+                    ['id' => 'system', 'label' => 'Quản trị hệ thống', 'icon' => 'bx-cog', 'items' => [
+                        ['url' => '../admin/users.php', 'icon' => 'bx-group', 'label' => 'Quản lý Tài khoản', 'match' => ['admin/users.php']],
+                        ['url' => '../admin/system_health.php', 'icon' => 'bx-pulse', 'label' => 'Tình trạng hệ thống', 'match' => ['admin/system_health.php']],
+                        ['url' => '../admin/backups.php', 'icon' => 'bx-data', 'label' => 'Sao lưu dữ liệu', 'match' => ['admin/backups.php']],
+                        ['url' => '../student/dashboard.php', 'icon' => 'bx-book-reader', 'label' => 'Giao diện Học viên', 'match' => ['student/dashboard.php', 'student/assignment.php', 'student/outstanding_submissions.php']],
+                    ]],
                 ];
             } elseif ($role === 'teacher') {
                 $menus = [
@@ -840,13 +865,31 @@ if (isset($pdo) && $pdo instanceof PDO && !empty($_SESSION['user_id'])) {
                 $menus = [
                     ['url' => '../student/assignments.php', 'icon' => 'bx-book-open', 'label' => 'Làm bài theo khóa học', 'match' => ['student/assignments.php']],
                     ['url' => '../student/quizzes.php', 'icon' => 'bx-list-check', 'label' => 'Làm trắc nghiệm', 'match' => ['student/quizzes.php', 'student/quiz.php']],
+                    ['url' => '../student/achievements.php', 'icon' => 'bx-medal', 'label' => 'Thành tích của tôi', 'match' => ['student/achievements.php']],
                     ['url' => '../student/dashboard.php', 'icon' => 'bx-home-alt', 'label' => 'Tổng quan Học tập', 'match' => ['student/dashboard.php', 'student/course.php', 'student/assignment.php', 'student/outstanding_submissions.php']]
                 ];
             }
             
-            foreach ($menus as $menu) {
-                $is_active = in_array($current_page, $menu['match']) ? 'active' : '';
-                echo "<a href=\"{$menu['url']}\" class=\"menu-item {$is_active}\"><i class='bx {$menu['icon']}'></i> {$menu['label']}</a>";
+            if ($role === 'admin') {
+                foreach ($menuGroups as $group) {
+                    $groupActive = false;
+                    foreach ($group['items'] as $item) {
+                        if (in_array($current_page, $item['match'], true)) { $groupActive = true; break; }
+                    }
+                    echo '<section class="sidebar-group' . ($groupActive ? ' has-active' : '') . '" data-sidebar-group="' . htmlspecialchars($group['id']) . '">';
+                    echo '<button type="button" class="sidebar-group-toggle" aria-expanded="true"><i class="bx ' . htmlspecialchars($group['icon']) . '"></i><span>' . htmlspecialchars($group['label']) . '</span><i class="bx bx-chevron-down group-chevron"></i></button>';
+                    echo '<div class="sidebar-group-items"><div class="sidebar-group-items-inner">';
+                    foreach ($group['items'] as $menu) {
+                        $isActive = in_array($current_page, $menu['match'], true) ? 'active' : '';
+                        echo '<a href="' . htmlspecialchars($menu['url']) . '" class="menu-item ' . $isActive . '"><i class="bx ' . htmlspecialchars($menu['icon']) . '"></i> ' . htmlspecialchars($menu['label']) . '</a>';
+                    }
+                    echo '</div></div></section>';
+                }
+            } else {
+                foreach ($menus as $menu) {
+                    $is_active = in_array($current_page, $menu['match'], true) ? 'active' : '';
+                    echo "<a href=\"{$menu['url']}\" class=\"menu-item {$is_active}\"><i class='bx {$menu['icon']}'></i> {$menu['label']}</a>";
+                }
             }
             ?>
         </div>
@@ -872,7 +915,7 @@ if (isset($pdo) && $pdo instanceof PDO && !empty($_SESSION['user_id'])) {
                     </div>
                 </div>
                 <div class="user-dropdown">
-                    <a href="../account/profile.php"><i class='bx bx-edit'></i> Chỉnh sửa thông tin</a>
+                    <a href="../account/profile.php"><i class='bx bx-edit'></i> Hồ sơ & mật khẩu</a>
                     <a href="../includes/logout.php" class="text-danger"><i class='bx bx-log-out'></i> Đăng xuất</a>
                 </div>
             </div>
