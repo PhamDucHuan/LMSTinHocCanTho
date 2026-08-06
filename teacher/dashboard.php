@@ -94,35 +94,16 @@ require_once '../includes/header.php';
     </div>
 </div>
 
+<script src="../assets/js/native-charts.js"></script>
 <script>
 document.addEventListener("DOMContentLoaded", function() {
     <?php if (count($assign_labels) > 0): ?>
-    const ctx = document.getElementById('submissionChart').getContext('2d');
-    new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: <?php echo json_encode($assign_labels); ?>,
-            datasets: [{
-                label: 'Số bài nộp',
-                data: <?php echo json_encode($sub_data); ?>,
-                backgroundColor: 'rgba(16, 185, 129, 0.8)',
-                borderColor: '#10b981',
-                borderWidth: 1,
-                borderRadius: 4
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.1)' }, ticks: { color: '#94a3b8', stepSize: 1 } },
-                x: { grid: { display: false }, ticks: { color: '#94a3b8' } }
-            },
-            plugins: {
-                legend: { display: false }
-            }
-        }
-    });
+    NativeCharts.bar(
+        document.getElementById('submissionChart'),
+        <?php echo json_encode($assign_labels); ?>,
+        <?php echo json_encode($sub_data); ?>,
+        { color: '#10b981', textColor: '#94a3b8', gridColor: 'rgba(255,255,255,.1)', height: 360 }
+    );
     <?php endif; ?>
 });
 </script>

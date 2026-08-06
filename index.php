@@ -22,7 +22,6 @@ if (!empty($_SESSION['user_id'])) {
     <link rel="icon" type="image/png" href="assets/images/LOGO1.png?v=3">
     <link rel="apple-touch-icon" href="assets/images/LOGO1.png?v=3">
     <!-- Google Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <!-- Custom CSS -->
     <link rel="stylesheet" href="assets/css/style.css">
     <!-- Boxicons for icons -->

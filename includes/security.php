@@ -60,18 +60,42 @@ function validateUploadedFile(array $file, array $extensions, int $maxBytes = 20
         : null;
     $mimeByExtension = [
         'doc' => ['application/msword', 'application/x-ole-storage', 'application/octet-stream'],
-        'docx' => ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/zip', 'application/octet-stream'],
+        'docx' => ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/zip', 'application/x-zip-compressed', 'application/vnd.ms-office', 'application/octet-stream'],
         'xls' => ['application/vnd.ms-excel', 'application/x-ole-storage', 'application/octet-stream'],
-        'xlsx' => ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/zip', 'application/octet-stream'],
+        'xlsx' => ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel', 'application/zip', 'application/x-zip-compressed', 'application/vnd.ms-office', 'application/octet-stream'],
         'ppt' => ['application/vnd.ms-powerpoint', 'application/x-ole-storage', 'application/octet-stream'],
-        'pptx' => ['application/vnd.openxmlformats-officedocument.presentationml.presentation', 'application/zip', 'application/octet-stream'],
+        'pptx' => ['application/vnd.openxmlformats-officedocument.presentationml.presentation', 'application/vnd.ms-powerpoint', 'application/zip', 'application/x-zip-compressed', 'application/vnd.ms-office', 'application/octet-stream'],
         'pdf' => ['application/pdf'],
         'zip' => ['application/zip', 'application/x-zip-compressed', 'application/octet-stream'],
         'rar' => ['application/vnd.rar', 'application/x-rar', 'application/x-rar-compressed', 'application/octet-stream'],
         '7z' => ['application/x-7z-compressed', 'application/octet-stream'],
+        'jpg' => ['image/jpeg'],
+        'jpeg' => ['image/jpeg'],
+        'png' => ['image/png'],
+        'gif' => ['image/gif'],
+        'webp' => ['image/webp'],
+        'bmp' => ['image/bmp', 'image/x-ms-bmp'],
     ];
     if ($mime && isset($mimeByExtension[$extension]) && !in_array($mime, $mimeByExtension[$extension], true)) {
-        throw new RuntimeException("Nội dung file không khớp với phần mở rộng .{$extension}.");
+        // MIME của các file Office Open XML thường bị XAMPP/Windows nhận dạng khác nhau.
+        // Kiểm tra cấu trúc gói Office thật thay vì chỉ tin MIME hoặc phần mở rộng.
+        $officeEntryByExtension = [
+            'docx' => 'word/document.xml',
+            'xlsx' => 'xl/workbook.xml',
+            'pptx' => 'ppt/presentation.xml',
+        ];
+        $isValidOfficePackage = false;
+        if (isset($officeEntryByExtension[$extension]) && class_exists(ZipArchive::class)) {
+            $archive = new ZipArchive();
+            if ($archive->open($file['tmp_name']) === true) {
+                $isValidOfficePackage = $archive->locateName('[Content_Types].xml') !== false
+                    && $archive->locateName($officeEntryByExtension[$extension]) !== false;
+                $archive->close();
+            }
+        }
+        if (!$isValidOfficePackage) {
+            throw new RuntimeException("Nội dung file không khớp với phần mở rộng .{$extension} (nhận dạng: {$mime}).");
+        }
     }
     return [
         'original_name' => $original,

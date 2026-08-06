@@ -129,6 +129,7 @@ require_once '../includes/header.php';
     </div>
 </div>
 
+<script src="../assets/js/native-charts.js"></script>
 <script>
 document.addEventListener("DOMContentLoaded", function() {
     const chartStyles = getComputedStyle(document.documentElement);
@@ -136,56 +137,20 @@ document.addEventListener("DOMContentLoaded", function() {
     const chartMutedColor = chartStyles.getPropertyValue('--text-muted').trim() || '#94a3b8';
     const chartGridColor = chartStyles.getPropertyValue('--border-color').trim() || 'rgba(255,255,255,.1)';
 
-    // Biểu đồ người dùng (Pie)
-    const ctxUser = document.getElementById('userChart').getContext('2d');
-    new Chart(ctxUser, {
-        type: 'doughnut',
-        data: {
-            labels: ['Học sinh', 'Giáo viên'],
-            datasets: [{
-                data: [<?php echo $stats['students']; ?>, <?php echo $stats['teachers']; ?>],
-                backgroundColor: ['#6366f1', '#f43f5e'],
-                borderWidth: 0
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            layout: { padding: 8 },
-            plugins: {
-                legend: { position: 'bottom', labels: { color: chartTextColor, boxWidth: 14, padding: 16 } }
-            }
-        }
-    });
+    NativeCharts.doughnut(
+        document.getElementById('userChart'),
+        ['Học sinh', 'Giáo viên'],
+        [<?php echo $stats['students']; ?>, <?php echo $stats['teachers']; ?>],
+        { colors: ['#6366f1', '#f43f5e'], textColor: chartTextColor }
+    );
 
     // Biểu đồ khóa học (Bar)
-    const ctxCourse = document.getElementById('courseChart').getContext('2d');
-    new Chart(ctxCourse, {
-        type: 'bar',
-        data: {
-            labels: <?php echo json_encode($course_labels); ?>,
-            datasets: [{
-                label: 'Số lượng bài tập',
-                data: <?php echo json_encode($course_data); ?>,
-                backgroundColor: 'rgba(99, 102, 241, 0.8)',
-                borderColor: '#6366f1',
-                borderWidth: 1,
-                borderRadius: 4
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            layout: { padding: 4 },
-            scales: {
-                y: { beginAtZero: true, grid: { color: chartGridColor }, ticks: { color: chartMutedColor, stepSize: 1 } },
-                x: { grid: { display: false }, ticks: { color: chartMutedColor } }
-            },
-            plugins: {
-                legend: { display: false }
-            }
-        }
-    });
+    NativeCharts.bar(
+        document.getElementById('courseChart'),
+        <?php echo json_encode($course_labels); ?>,
+        <?php echo json_encode($course_data); ?>,
+        { color: '#6366f1', textColor: chartMutedColor, gridColor: chartGridColor }
+    );
 });
 </script>
 

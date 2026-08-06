@@ -24,9 +24,7 @@ if (isset($pdo) && $pdo instanceof PDO && !empty($_SESSION['user_id'])) {
     <title><?php echo htmlspecialchars($page_title); ?></title>
     <link rel="icon" type="image/png" href="../assets/images/LOGO1.png?v=3">
     <link rel="apple-touch-icon" href="../assets/images/LOGO1.png?v=3">
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link href='https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css' rel='stylesheet'>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
             --primary: #6366f1;
@@ -443,7 +441,7 @@ if (isset($pdo) && $pdo instanceof PDO && !empty($_SESSION['user_id'])) {
             html[data-theme="sunset"] body::after { animation:none; }
         }
         * { box-sizing: border-box; }
-        body { font-family: 'Outfit', sans-serif; background: var(--bg-dark); color: var(--text-main); margin: 0; display: flex; min-height: 100vh; overflow-x: hidden; transition: background .25s, color .25s; }
+        body { font-family: system-ui, -apple-system, "Segoe UI", Arial, sans-serif; background: var(--bg-dark); color: var(--text-main); margin: 0; display: flex; min-height: 100vh; overflow-x: hidden; transition: background .25s, color .25s; }
         
         /* Sidebar Styles */
         .sidebar {
@@ -496,7 +494,7 @@ if (isset($pdo) && $pdo instanceof PDO && !empty($_SESSION['user_id'])) {
         .sidebar-group-toggle {
             width:100%; border:0; background:transparent; color:var(--text-muted); cursor:pointer;
             padding:12px 18px 9px; display:flex; align-items:center; gap:9px;
-            font:600 12px/1.2 'Outfit',sans-serif; letter-spacing:.08em; text-transform:uppercase;
+            font:600 12px/1.2 system-ui,-apple-system,"Segoe UI",Arial,sans-serif; letter-spacing:.08em; text-transform:uppercase;
             transition:background .2s,color .2s;
         }
         .sidebar-group-toggle:hover { background:rgba(255,255,255,.035); color:var(--text-main); }

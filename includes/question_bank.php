@@ -60,3 +60,62 @@ function questionDifficultyLabel(string $difficulty): string
 {
     return ['easy' => 'Dễ', 'medium' => 'Trung bình', 'hard' => 'Khó'][$difficulty] ?? 'Trung bình';
 }
+
+/**
+ * Chọn câu theo phân tầng động để giảm trùng trong cùng khóa học.
+ * Câu chưa dùng trong khóa học có chi phí 0 và luôn được ưu tiên. Khi không đủ,
+ * thuật toán lần lượt dùng các tầng có số lần xuất hiện thấp nhất. Việc xáo trộn
+ * chỉ diễn ra trong cùng một tầng nên không phá vỡ mức ưu tiên.
+ */
+function selectQuestionBankForCourse(
+    PDO $pdo,
+    int $courseId,
+    array $conditions,
+    array $params,
+    int $count
+): array {
+    if ($count <= 0) return [];
+
+    $sql = 'SELECT qb.*, COALESCE(course_usage.use_count, 0) AS course_usage_count
+        FROM question_bank qb
+        LEFT JOIN (
+            SELECT qq.source_question_id, COUNT(DISTINCT q.id) AS use_count
+            FROM quiz_questions qq
+            INNER JOIN quiz_sections qs ON qs.id = qq.section_id
+            INNER JOIN quizzes q ON q.id = qs.quiz_id
+            WHERE q.course_id = ? AND qq.source_question_id IS NOT NULL
+            GROUP BY qq.source_question_id
+        ) course_usage ON course_usage.source_question_id = qb.id
+        WHERE ' . implode(' AND ', $conditions);
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute(array_merge([$courseId], $params));
+    $candidates = $stmt->fetchAll();
+
+    if (count($candidates) < $count) return $candidates;
+
+    // Gom theo [số lần dùng trong khóa học][tổng lượt dùng] rồi cấp phát động.
+    $tiers = [];
+    foreach ($candidates as $candidate) {
+        $courseUses = max(0, (int) ($candidate['course_usage_count'] ?? 0));
+        $globalUses = max(0, (int) ($candidate['usage_count'] ?? 0));
+        $tiers[$courseUses][$globalUses][] = $candidate;
+    }
+    ksort($tiers, SORT_NUMERIC);
+
+    $selected = [];
+    foreach ($tiers as &$usageTiers) {
+        ksort($usageTiers, SORT_NUMERIC);
+        foreach ($usageTiers as &$questions) {
+            shuffle($questions);
+            $needed = $count - count($selected);
+            if ($needed <= 0) break 2;
+            $selected = array_merge($selected, array_slice($questions, 0, $needed));
+        }
+        unset($questions);
+    }
+    unset($usageTiers);
+
+    // Không để thứ tự ưu tiên làm lộ thứ tự câu trong đề.
+    shuffle($selected);
+    return $selected;
+}

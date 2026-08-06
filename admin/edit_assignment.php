@@ -82,18 +82,71 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } catch (Exception $e) {}
     }
 
+    // Giữ file thực hành hiện có, cho phép xóa riêng và tải bổ sung nhiều file.
+    $attachments = json_decode($assignment['attachments'] ?? '[]', true);
+    if (!is_array($attachments)) $attachments = [];
+
+    $removedAttachmentDriveIds = [];
+    $removedAttachmentIndexes = (array) ($_POST['remove_attachments'] ?? []);
+    if (isset($_POST['remove_attachment_now'])) {
+        $removedAttachmentIndexes[] = $_POST['remove_attachment_now'];
+    }
+    foreach (array_map('intval', $removedAttachmentIndexes) as $attachmentIndex) {
+        if (!isset($attachments[$attachmentIndex])) continue;
+        $removedDriveId = $attachments[$attachmentIndex]['drive_id'] ?? null;
+        if ($removedDriveId) $removedAttachmentDriveIds[] = $removedDriveId;
+        unset($attachments[$attachmentIndex]);
+    }
+    $attachments = array_values($attachments);
+
+    if (isset($_FILES['resource_files']['name']) && is_array($_FILES['resource_files']['name'])) {
+        $fileCount = count($_FILES['resource_files']['name']);
+        for ($i = 0; $i < $fileCount; $i++) {
+            if ((int) $_FILES['resource_files']['error'][$i] === UPLOAD_ERR_NO_FILE) continue;
+            try {
+                $valid = validateUploadedFile([
+                    'name' => $_FILES['resource_files']['name'][$i],
+                    'tmp_name' => $_FILES['resource_files']['tmp_name'][$i],
+                    'error' => $_FILES['resource_files']['error'][$i],
+                    'size' => $_FILES['resource_files']['size'][$i],
+                ], ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'pdf', 'zip', 'rar', '7z', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp']);
+                $storedName = bin2hex(random_bytes(12)) . '.' . $valid['extension'];
+                $attachments[] = [
+                    'name' => $valid['original_name'],
+                    'drive_id' => uploadToDrive($valid['tmp_name'], $storedName, $assignment_folder),
+                ];
+            } catch (Throwable $e) {
+                $_SESSION['error'] = 'Không thể tải file bổ sung: ' . $e->getMessage();
+                header('Location: edit_assignment.php?id=' . urlencode((string) $id));
+                exit;
+            }
+        }
+    }
+    $attachmentsJson = $attachments ? json_encode($attachments, JSON_UNESCAPED_UNICODE) : null;
+
     $solution_file_drive_id = null;
     $solution_file_name = null;
 
-    $update = $pdo->prepare("UPDATE assignments SET title = ?, description = ?, due_date = ?, category = ?, type = ?, duration_minutes = ?, module_settings = ?, prompt_file_drive_id = ?, prompt_file_name = ?, solution_file_drive_id = ?, solution_file_name = ? WHERE id = ?");
-    $update->execute([$title, $description, $due_date, $category, $type, $duration_minutes, $module_settings_json, $prompt_file_drive_id, $prompt_file_name, $solution_file_drive_id, $solution_file_name, $id]);
+    $update = $pdo->prepare("UPDATE assignments SET title = ?, description = ?, due_date = ?, category = ?, type = ?, duration_minutes = ?, module_settings = ?, prompt_file_drive_id = ?, prompt_file_name = ?, solution_file_drive_id = ?, solution_file_name = ?, attachments = ? WHERE id = ?");
+    $update->execute([$title, $description, $due_date, $category, $type, $duration_minutes, $module_settings_json, $prompt_file_drive_id, $prompt_file_name, $solution_file_drive_id, $solution_file_name, $attachmentsJson, $id]);
+    foreach ($removedAttachmentDriveIds as $removedDriveId) {
+        try { deleteFromDrive($removedDriveId); } catch (Throwable $e) {}
+    }
     
+    if (isset($_POST['remove_attachment_now'])) {
+        $_SESSION['success'] = "Đã xóa file đính kèm!";
+        header('Location: edit_assignment.php?id=' . urlencode((string) $id));
+        exit;
+    }
+
     $_SESSION['success'] = "Cập nhật bài tập thành công!";
-    header('Location: assignments.php');
+    header('Location: edit_assignment.php?id=' . urlencode((string) $id));
     exit;
 }
 
 $module_settings = json_decode($assignment['module_settings'] ?? '[]', true);
+$attachments = json_decode($assignment['attachments'] ?? '[]', true);
+if (!is_array($attachments)) $attachments = [];
 $selected_modules = [];
 $module_scores = [];
 $module_criteria = [];
@@ -263,6 +316,29 @@ require_once '../includes/header.php';
                         <input type="file" name="prompt_file" accept=".doc,.docx,.pdf" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; color: #fff;">
                     </div>
                 
+                <div class="form-group" style="margin-top:20px;">
+                    <label>File thực hành/đính kèm bổ sung</label>
+                    <?php if ($attachments): ?>
+                        <div style="display:grid;gap:8px;margin:10px 0 14px;">
+                            <?php foreach ($attachments as $attachmentIndex => $attachment): ?>
+                                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 13px;border:1px solid rgba(255,255,255,.1);border-radius:8px;background:rgba(255,255,255,.035);">
+                                    <a href="../download.php?kind=attachment&amp;id=<?php echo (int) $id; ?>&amp;index=<?php echo (int) $attachmentIndex; ?>" style="color:#38bdf8;min-width:0;overflow-wrap:anywhere;">
+                                        <i class='bx bx-paperclip'></i>
+                                        <?php echo htmlspecialchars((string) ($attachment['name'] ?? 'File đính kèm')); ?>
+                                    </a>
+                                    <button type="submit" name="remove_attachment_now" value="<?php echo (int) $attachmentIndex; ?>" onclick="return confirm('Bạn có chắc muốn xóa file này?');" style="display:inline-flex;align-items:center;gap:6px;padding:8px 11px;border:1px solid #fb7185;border-radius:7px;background:rgba(251,113,133,.08);color:#fb7185;font:inherit;font-size:13px;font-weight:700;white-space:nowrap;cursor:pointer;">
+                                        <i class='bx bx-trash'></i> Xóa file
+                                    </button>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php else: ?>
+                        <p style="margin:8px 0 12px;color:var(--text-muted);font-size:14px;">Bài này chưa có file bổ sung.</p>
+                    <?php endif; ?>
+                    <input type="file" name="resource_files[]" multiple accept=".doc,.docx,.xls,.xlsx,.ppt,.pptx,.pdf,.zip,.rar,.7z,.jpg,.jpeg,.png,.gif,.webp,.bmp,image/*" style="width:100%;padding:12px;background:rgba(0,0,0,.2);border:1px dashed rgba(56,189,248,.45);border-radius:8px;color:#fff;">
+                    <small style="display:block;margin-top:7px;color:var(--text-muted);">Có thể chọn nhiều file. File mới sẽ được thêm vào, không thay thế file đang có.</small>
+                </div>
+
                 <button type="submit" class="btn btn-primary" style="width: 100%;"><i class='bx bx-save'></i> Lưu thay đổi</button>
             </form>
         </div>

@@ -238,48 +238,16 @@ require_once '../includes/header.php';
     </div>
 </div>
 
+<script src="../assets/js/native-charts.js"></script>
 <script>
 document.addEventListener("DOMContentLoaded", function() {
     <?php if (count($radar_labels) > 0): ?>
-    const ctx = document.getElementById('scoreChart').getContext('2d');
-    new Chart(ctx, {
-        type: 'radar',
-        data: {
-            labels: <?php echo json_encode($radar_labels); ?>,
-            datasets: [{
-                label: 'Điểm trung bình',
-                data: <?php echo json_encode($radar_data); ?>,
-                backgroundColor: 'rgba(99, 102, 241, 0.2)',
-                borderColor: '#6366f1',
-                pointBackgroundColor: '#6366f1',
-                pointBorderColor: '#fff',
-                pointHoverBackgroundColor: '#fff',
-                pointHoverBorderColor: '#6366f1',
-                borderWidth: 2
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                r: {
-                    angleLines: { color: 'rgba(255,255,255,0.1)' },
-                    grid: { color: 'rgba(255,255,255,0.1)' },
-                    pointLabels: { color: '#f8fafc', font: { size: 14 } },
-                    ticks: {
-                        color: '#94a3b8',
-                        backdropColor: 'transparent',
-                        min: 0,
-                        max: 10,
-                        stepSize: 2
-                    }
-                }
-            },
-            plugins: {
-                legend: { display: false }
-            }
-        }
-    });
+    NativeCharts.radar(
+        document.getElementById('scoreChart'),
+        <?php echo json_encode($radar_labels); ?>,
+        <?php echo json_encode($radar_data); ?>,
+        { max: 10, color: '#6366f1', fill: 'rgba(99,102,241,.2)', textColor: '#f8fafc' }
+    );
     <?php endif; ?>
 });
 </script>

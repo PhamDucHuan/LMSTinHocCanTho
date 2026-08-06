@@ -97,7 +97,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'name' => $_FILES['resource_files']['name'][$i], 'tmp_name' => $_FILES['resource_files']['tmp_name'][$i],
                         'error' => $_FILES['resource_files']['error'][$i], 'size' => $_FILES['resource_files']['size'][$i]
                     ];
-                    $valid = validateUploadedFile($singleFile, ['doc','docx','xls','xlsx','ppt','pptx','pdf','zip','rar','7z']);
+                    $valid = validateUploadedFile($singleFile, ['doc','docx','xls','xlsx','ppt','pptx','pdf','zip','rar','7z','jpg','jpeg','png','gif','webp','bmp']);
                     $file_tmp = $valid['tmp_name'];
                     $original_name = $valid['original_name'];
                     $file_name = bin2hex(random_bytes(12)) . '.' . $valid['extension'];
@@ -348,7 +348,7 @@ require_once '../includes/header.php';
                             <p style="font-size: 14px; color: var(--text-muted);">Tải các file đính kèm cho HS</p>
                             <div id="resource-files-name-display" style="color: #e2e8f0; font-weight: 500; text-align: left; padding: 5px; font-size: 13px;"></div>
                         </div>
-                        <input type="file" id="resource_files" name="resource_files[]" multiple style="display: none;" accept=".doc,.docx,.xls,.xlsx,.ppt,.pptx,.pdf,.zip,.rar" onchange="updateResourceFiles(this)">
+                        <input type="file" id="resource_files" name="resource_files[]" multiple style="display: none;" accept=".doc,.docx,.xls,.xlsx,.ppt,.pptx,.pdf,.zip,.rar,.7z,.jpg,.jpeg,.png,.gif,.webp,.bmp,image/*" onchange="updateResourceFiles(this)">
                     </div>
                 </div>
                 
