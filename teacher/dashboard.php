@@ -10,24 +10,25 @@ if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_role'], ['teacher'
 
 $teacher_id = $_SESSION['user_id'];
 
-// Lấy thống kê tổng quan
-$stats = [
-    'courses' => $pdo->prepare("SELECT COUNT(*) FROM courses WHERE teacher_id = ?"),
-    'assignments' => $pdo->prepare("SELECT COUNT(*) FROM assignments WHERE teacher_id = ?"),
-    'submissions' => $pdo->prepare("SELECT COUNT(s.id) FROM submissions s JOIN assignments a ON s.assignment_id = a.id WHERE a.teacher_id = ?"),
-    'review_required' => $pdo->prepare("SELECT COUNT(s.id) FROM submissions s JOIN assignments a ON s.assignment_id = a.id WHERE a.teacher_id = ? AND s.grading_status = 'review_required'")
-];
-
-foreach ($stats as $key => $stmt) {
-    $stmt->execute([$teacher_id]);
-    $stats[$key] = $stmt->fetchColumn();
-}
+// Một truy vấn thay cho bốn lượt đếm riêng.
+$statsStmt = $pdo->prepare("SELECT
+    (SELECT COUNT(*) FROM courses WHERE teacher_id=?) AS courses,
+    COUNT(DISTINCT a.id) AS assignments,
+    COUNT(s.id) AS submissions,
+    COALESCE(SUM(s.grading_status='review_required'),0) AS review_required
+    FROM assignments a
+    LEFT JOIN submissions s ON s.assignment_id=a.id
+    WHERE a.teacher_id=?");
+$statsStmt->execute([$teacher_id, $teacher_id]);
+$stats = $statsStmt->fetch();
 
 // Lấy số lượng bài nộp trên từng bài tập gần đây (tối đa 5 bài tập)
 $recent_assignments = $pdo->prepare("
-    SELECT a.title, (SELECT COUNT(*) FROM submissions s WHERE s.assignment_id = a.id) as sub_count
+    SELECT a.title, COUNT(s.id) AS sub_count
     FROM assignments a
+    LEFT JOIN submissions s ON s.assignment_id = a.id
     WHERE a.teacher_id = ?
+    GROUP BY a.id, a.title, a.created_at
     ORDER BY a.created_at DESC
     LIMIT 5
 ");

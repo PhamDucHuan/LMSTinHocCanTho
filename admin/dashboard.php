@@ -13,18 +13,19 @@ if (!isset($pdo) || $pdo === null) {
     die('Database connection failed');
 }
 
-// Lấy thống kê tổng quan
-$stats = [
-    'students' => $pdo->query("SELECT COUNT(*) FROM users WHERE role = 'student'")->fetchColumn(),
-    'teachers' => $pdo->query("SELECT COUNT(*) FROM users WHERE role = 'teacher'")->fetchColumn(),
-    'courses' => $pdo->query("SELECT COUNT(*) FROM courses")->fetchColumn(),
-    'assignments' => $pdo->query("SELECT COUNT(*) FROM assignments")->fetchColumn(),
-    'submissions' => $pdo->query("SELECT COUNT(*) FROM submissions")->fetchColumn(),
-    'ai_waiting' => $pdo->query("SELECT COUNT(*) FROM grading_jobs WHERE status IN ('queued','processing')")->fetchColumn(),
-    'review_required' => $pdo->query("SELECT COUNT(*) FROM submissions WHERE grading_status = 'review_required'")->fetchColumn(),
-    'ai_failed' => $pdo->query("SELECT COUNT(*) FROM grading_jobs WHERE status = 'failed'")->fetchColumn(),
-    'ai_avg_seconds' => $pdo->query("SELECT COALESCE(ROUND(AVG(TIMESTAMPDIFF(SECOND, started_at, completed_at))),0) FROM grading_jobs WHERE status='completed' AND started_at IS NOT NULL")->fetchColumn()
-];
+// Gom toàn bộ số liệu tổng quan vào một lượt trao đổi với MySQL.
+$stats = $pdo->query("SELECT
+    (SELECT COUNT(*) FROM users WHERE role='student') AS students,
+    (SELECT COUNT(*) FROM users WHERE role='teacher') AS teachers,
+    (SELECT COUNT(*) FROM courses) AS courses,
+    (SELECT COUNT(*) FROM assignments) AS assignments,
+    (SELECT COUNT(*) FROM submissions) AS submissions,
+    (SELECT COUNT(*) FROM submissions WHERE grading_status='review_required') AS review_required,
+    (SELECT COUNT(*) FROM grading_jobs WHERE status IN ('queued','processing')) AS ai_waiting,
+    (SELECT COUNT(*) FROM grading_jobs WHERE status='failed') AS ai_failed,
+    (SELECT COALESCE(ROUND(AVG(TIMESTAMPDIFF(SECOND,started_at,completed_at))),0)
+       FROM grading_jobs WHERE status='completed' AND started_at IS NOT NULL AND completed_at IS NOT NULL) AS ai_avg_seconds
+")->fetch();
 
 // Lấy danh sách khóa học có nhiều bài tập nhất
 $top_courses = $pdo->query("

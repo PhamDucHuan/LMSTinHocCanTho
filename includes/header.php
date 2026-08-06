@@ -849,45 +849,52 @@ if (isset($pdo) && $pdo instanceof PDO && !empty($_SESSION['user_id'])) {
                     ]],
                 ];
             } elseif ($role === 'teacher') {
-                $menus = [
-                    ['url' => '../teacher/question_bank.php', 'icon' => 'bx-library', 'label' => 'Ngân hàng câu hỏi', 'match' => ['teacher/question_bank.php']],
-                    ['url' => '../teacher/dashboard.php', 'icon' => 'bx-bar-chart-alt-2', 'label' => 'Tổng quan', 'match' => ['teacher/dashboard.php']],
-                    ['url' => '../teacher/courses.php', 'icon' => 'bx-book-open', 'label' => 'Quản lý Khóa học', 'match' => ['teacher/courses.php', 'teacher/course_detail.php', 'teacher/quizzes.php']],
-                    ['url' => '../teacher/assignments.php', 'icon' => 'bx-book-content', 'label' => 'Danh sách Bài tập', 'match' => ['teacher/assignments.php', 'teacher/edit_assignment.php']],
-                    ['url' => '../teacher/submissions.php', 'icon' => 'bx-file-find', 'label' => 'Bài làm Học viên', 'match' => ['teacher/submissions.php']],
-                    ['url' => '../teacher/student_progress.php', 'icon' => 'bx-line-chart', 'label' => 'Tiến độ Học viên', 'match' => ['teacher/student_progress.php']],
-                    ['url' => '../teacher/create_assignment.php', 'icon' => 'bx-plus-circle', 'label' => 'Giao Bài Mới', 'match' => ['teacher/create_assignment.php']],
-                    ['url' => '../student/dashboard.php', 'icon' => 'bx-book-reader', 'label' => 'Giao diện Học viên', 'match' => ['student/dashboard.php', 'student/assignment.php', 'student/outstanding_submissions.php']]
+                $menuGroups = [
+                    ['id' => 'teacher-overview', 'label' => 'Tổng quan', 'icon' => 'bx-home-alt', 'items' => [
+                        ['url' => '../teacher/dashboard.php', 'icon' => 'bx-bar-chart-alt-2', 'label' => 'Bảng điều khiển', 'match' => ['teacher/dashboard.php']],
+                    ]],
+                    ['id' => 'teacher-training', 'label' => 'Quản lý đào tạo', 'icon' => 'bx-book-open', 'items' => [
+                        ['url' => '../teacher/courses.php', 'icon' => 'bx-book-open', 'label' => 'Quản lý Khóa học', 'match' => ['teacher/courses.php', 'teacher/course_detail.php', 'teacher/quizzes.php']],
+                        ['url' => '../teacher/assignments.php', 'icon' => 'bx-book-content', 'label' => 'Danh sách Bài tập', 'match' => ['teacher/assignments.php', 'teacher/edit_assignment.php']],
+                        ['url' => '../teacher/create_assignment.php', 'icon' => 'bx-plus-circle', 'label' => 'Giao Bài Mới', 'match' => ['teacher/create_assignment.php']],
+                        ['url' => '../teacher/question_bank.php', 'icon' => 'bx-library', 'label' => 'Ngân hàng câu hỏi', 'match' => ['teacher/question_bank.php']],
+                    ]],
+                    ['id' => 'teacher-students', 'label' => 'Theo dõi học viên', 'icon' => 'bx-group', 'items' => [
+                        ['url' => '../teacher/submissions.php', 'icon' => 'bx-file-find', 'label' => 'Bài làm Học viên', 'match' => ['teacher/submissions.php']],
+                        ['url' => '../teacher/student_progress.php', 'icon' => 'bx-line-chart', 'label' => 'Tiến độ Học viên', 'match' => ['teacher/student_progress.php']],
+                    ]],
+                    ['id' => 'teacher-preview', 'label' => 'Xem giao diện', 'icon' => 'bx-show', 'items' => [
+                        ['url' => '../student/dashboard.php', 'icon' => 'bx-book-reader', 'label' => 'Giao diện Học viên', 'match' => ['student/dashboard.php', 'student/course.php', 'student/assignment.php', 'student/outstanding_submissions.php', 'student/assignments.php', 'student/quizzes.php', 'student/quiz.php']],
+                    ]],
                 ];
             } else { // student
-                $menus = [
-                    ['url' => '../student/assignments.php', 'icon' => 'bx-book-open', 'label' => 'Làm bài theo khóa học', 'match' => ['student/assignments.php']],
-                    ['url' => '../student/quizzes.php', 'icon' => 'bx-list-check', 'label' => 'Làm trắc nghiệm', 'match' => ['student/quizzes.php', 'student/quiz.php']],
-                    ['url' => '../student/achievements.php', 'icon' => 'bx-medal', 'label' => 'Thành tích của tôi', 'match' => ['student/achievements.php']],
-                    ['url' => '../student/dashboard.php', 'icon' => 'bx-home-alt', 'label' => 'Tổng quan Học tập', 'match' => ['student/dashboard.php', 'student/course.php', 'student/assignment.php', 'student/outstanding_submissions.php']]
+                $menuGroups = [
+                    ['id' => 'student-overview', 'label' => 'Tổng quan', 'icon' => 'bx-home-alt', 'items' => [
+                        ['url' => '../student/dashboard.php', 'icon' => 'bx-home-alt', 'label' => 'Tổng quan Học tập', 'match' => ['student/dashboard.php']],
+                    ]],
+                    ['id' => 'student-learning', 'label' => 'Học tập & làm bài', 'icon' => 'bx-book-open', 'items' => [
+                        ['url' => '../student/assignments.php', 'icon' => 'bx-book-open', 'label' => 'Bài tập theo Khóa học', 'match' => ['student/assignments.php', 'student/course.php', 'student/assignment.php', 'student/outstanding_submissions.php']],
+                        ['url' => '../student/quizzes.php', 'icon' => 'bx-list-check', 'label' => 'Làm trắc nghiệm', 'match' => ['student/quizzes.php', 'student/quiz.php']],
+                    ]],
+                    ['id' => 'student-results', 'label' => 'Kết quả cá nhân', 'icon' => 'bx-trophy', 'items' => [
+                        ['url' => '../student/achievements.php', 'icon' => 'bx-medal', 'label' => 'Thành tích của tôi', 'match' => ['student/achievements.php']],
+                    ]],
                 ];
             }
             
-            if ($role === 'admin') {
-                foreach ($menuGroups as $group) {
-                    $groupActive = false;
-                    foreach ($group['items'] as $item) {
-                        if (in_array($current_page, $item['match'], true)) { $groupActive = true; break; }
-                    }
-                    echo '<section class="sidebar-group' . ($groupActive ? ' has-active' : '') . '" data-sidebar-group="' . htmlspecialchars($group['id']) . '">';
-                    echo '<button type="button" class="sidebar-group-toggle" aria-expanded="true"><i class="bx ' . htmlspecialchars($group['icon']) . '"></i><span>' . htmlspecialchars($group['label']) . '</span><i class="bx bx-chevron-down group-chevron"></i></button>';
-                    echo '<div class="sidebar-group-items"><div class="sidebar-group-items-inner">';
-                    foreach ($group['items'] as $menu) {
-                        $isActive = in_array($current_page, $menu['match'], true) ? 'active' : '';
-                        echo '<a href="' . htmlspecialchars($menu['url']) . '" class="menu-item ' . $isActive . '"><i class="bx ' . htmlspecialchars($menu['icon']) . '"></i> ' . htmlspecialchars($menu['label']) . '</a>';
-                    }
-                    echo '</div></div></section>';
+            foreach ($menuGroups as $group) {
+                $groupActive = false;
+                foreach ($group['items'] as $item) {
+                    if (in_array($current_page, $item['match'], true)) { $groupActive = true; break; }
                 }
-            } else {
-                foreach ($menus as $menu) {
-                    $is_active = in_array($current_page, $menu['match'], true) ? 'active' : '';
-                    echo "<a href=\"{$menu['url']}\" class=\"menu-item {$is_active}\"><i class='bx {$menu['icon']}'></i> {$menu['label']}</a>";
+                echo '<section class="sidebar-group' . ($groupActive ? ' has-active' : '') . '" data-sidebar-group="' . htmlspecialchars($group['id']) . '">';
+                echo '<button type="button" class="sidebar-group-toggle" aria-expanded="true"><i class="bx ' . htmlspecialchars($group['icon']) . '"></i><span>' . htmlspecialchars($group['label']) . '</span><i class="bx bx-chevron-down group-chevron"></i></button>';
+                echo '<div class="sidebar-group-items"><div class="sidebar-group-items-inner">';
+                foreach ($group['items'] as $menu) {
+                    $isActive = in_array($current_page, $menu['match'], true) ? 'active' : '';
+                    echo '<a href="' . htmlspecialchars($menu['url']) . '" class="menu-item ' . $isActive . '"><i class="bx ' . htmlspecialchars($menu['icon']) . '"></i> ' . htmlspecialchars($menu['label']) . '</a>';
                 }
+                echo '</div></div></section>';
             }
             ?>
         </div>

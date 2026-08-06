@@ -77,16 +77,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'reque
 }
 
 // --- THỐNG KÊ ---
-$stats = [
-    'courses' => $pdo->prepare("SELECT COUNT(*) FROM course_enrollments WHERE student_id = ?"),
-    'completed' => $pdo->prepare("SELECT COUNT(*) FROM submissions WHERE student_id = ?"),
-    'avg_score' => $pdo->prepare("SELECT AVG(score) FROM submissions WHERE student_id = ? AND score IS NOT NULL")
-];
-
-foreach ($stats as $key => $stmt) {
-    $stmt->execute([$student_id]);
-    $stats[$key] = $stmt->fetchColumn();
-}
+$statsStmt = $pdo->prepare("SELECT
+    (SELECT COUNT(*) FROM course_enrollments WHERE student_id=?) AS courses,
+    (SELECT COUNT(*) FROM submissions WHERE student_id=?) AS completed,
+    (SELECT AVG(score) FROM submissions WHERE student_id=? AND score IS NOT NULL) AS avg_score");
+$statsStmt->execute([$student_id, $student_id, $student_id]);
+$stats = $statsStmt->fetch();
 if ($stats['avg_score'] !== null) {
     $stats['avg_score'] = round($stats['avg_score'], 1);
 } else {
@@ -140,21 +136,23 @@ $assignments = $stmt->fetchAll();
 
 if ($is_staff) {
     $courseListStmt = $pdo->query("
-        SELECT c.id, c.title, c.slug, c.description, COUNT(a.id) AS assignment_count,
-               (SELECT COUNT(*) FROM quizzes q WHERE q.course_id=c.id AND q.is_published=1) AS quiz_count
+        SELECT c.id, c.title, c.slug, c.description,
+               COALESCE(ac.assignment_count,0) AS assignment_count,
+               COALESCE(qc.quiz_count,0) AS quiz_count
         FROM courses c
-        LEFT JOIN assignments a ON a.course_id = c.id
-        GROUP BY c.id, c.title, c.description
+        LEFT JOIN (SELECT course_id,COUNT(*) assignment_count FROM assignments WHERE course_id IS NOT NULL GROUP BY course_id) ac ON ac.course_id=c.id
+        LEFT JOIN (SELECT course_id,COUNT(*) quiz_count FROM quizzes WHERE is_published=1 GROUP BY course_id) qc ON qc.course_id=c.id
         ORDER BY c.created_at DESC
     ");
 } else {
     $courseListStmt = $pdo->prepare("
-        SELECT c.id, c.title, c.slug, c.description, COUNT(a.id) AS assignment_count,
-               (SELECT COUNT(*) FROM quizzes q WHERE q.course_id=c.id AND q.is_published=1) AS quiz_count
+        SELECT c.id, c.title, c.slug, c.description,
+               COALESCE(ac.assignment_count,0) AS assignment_count,
+               COALESCE(qc.quiz_count,0) AS quiz_count
         FROM courses c
         JOIN course_enrollments ce ON ce.course_id = c.id AND ce.student_id = ?
-        LEFT JOIN assignments a ON a.course_id = c.id
-        GROUP BY c.id, c.title, c.description
+        LEFT JOIN (SELECT course_id,COUNT(*) assignment_count FROM assignments WHERE course_id IS NOT NULL GROUP BY course_id) ac ON ac.course_id=c.id
+        LEFT JOIN (SELECT course_id,COUNT(*) quiz_count FROM quizzes WHERE is_published=1 GROUP BY course_id) qc ON qc.course_id=c.id
         ORDER BY ce.enrolled_at DESC
     ");
     $courseListStmt->execute([$student_id]);
