@@ -37,9 +37,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $hashed_password = password_hash($password, PASSWORD_DEFAULT);
         
-        $stmt = $pdo->prepare("INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)");
+        $stmt = $pdo->prepare("INSERT INTO users (name, email, password_hash, role, is_approved) VALUES (?, ?, ?, ?, 0)");
         if ($stmt->execute([$name, $email, $hashed_password, $role])) {
-            $_SESSION['success'] = 'Đăng ký thành công! Vui lòng đăng nhập.';
+            $_SESSION['success'] = 'Đăng ký thành công! Tài khoản đang chờ Admin duyệt và sẽ có quyền Học viên sau khi được duyệt.';
             header('Location: ../index.php');
             exit;
         } else {
@@ -63,6 +63,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($user && isAccountLocked($pdo, (int) $user['id'])) {
             $_SESSION['error'] = 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.';
+            header('Location: ../index.php');
+            exit;
+        }
+
+        if ($user && !isAccountApproved($pdo, (int) $user['id'])) {
+            $_SESSION['error'] = 'Tài khoản đang chờ Admin duyệt. Bạn chưa thể đăng nhập.';
             header('Location: ../index.php');
             exit;
         }

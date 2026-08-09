@@ -14,11 +14,29 @@ function isAccountLocked(PDO $pdo, int $userId): bool
     }
 }
 
+function isAccountApproved(PDO $pdo, int $userId): bool
+{
+    try {
+        $stmt = $pdo->prepare('SELECT is_approved FROM users WHERE id = ? LIMIT 1');
+        $stmt->execute([$userId]);
+        $value = $stmt->fetchColumn();
+        return $value !== false && (int) $value === 1;
+    } catch (PDOException $error) {
+        // Giữ hệ thống hoạt động trong lúc migration chưa được chạy.
+        if (stripos($error->getMessage(), 'is_approved') !== false) return true;
+        throw $error;
+    }
+}
+
 function terminateLockedAccountSession(PDO $pdo): void
 {
-    if (empty($_SESSION['user_id']) || !isAccountLocked($pdo, (int) $_SESSION['user_id'])) return;
+    if (empty($_SESSION['user_id'])) return;
+    $userId = (int) $_SESSION['user_id'];
+    $locked = isAccountLocked($pdo, $userId);
+    $approved = isAccountApproved($pdo, $userId);
+    if (!$locked && $approved) return;
     try {
-        $pdo->prepare('DELETE FROM user_remember_tokens WHERE user_id = ?')->execute([(int) $_SESSION['user_id']]);
+        $pdo->prepare('DELETE FROM user_remember_tokens WHERE user_id = ?')->execute([$userId]);
     } catch (Throwable $error) {
         error_log('Cannot revoke locked account tokens: ' . $error->getMessage());
     }
@@ -30,7 +48,9 @@ function terminateLockedAccountSession(PDO $pdo): void
     setcookie('lms_google_remember', '', ['expires' => time() - 3600, 'path' => '/', 'secure' => !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off', 'httponly' => true, 'samesite' => 'Lax']);
     session_destroy();
     session_start();
-    $_SESSION['error'] = 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.';
+    $_SESSION['error'] = $locked
+        ? 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.'
+        : 'Tài khoản đang chờ Admin duyệt. Bạn chưa thể truy cập hệ thống.';
     $directory = str_replace('\\', '/', dirname((string) ($_SERVER['SCRIPT_NAME'] ?? '/')));
     if (in_array(basename($directory), ['admin', 'teacher', 'student', 'account', 'includes'], true)) $directory = dirname($directory);
     header('Location: ' . rtrim($directory, '/') . '/index.php');

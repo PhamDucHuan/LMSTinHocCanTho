@@ -67,7 +67,7 @@ function restoreRememberedGoogleLogin(PDO $pdo): bool
 
     ensureRememberLoginTable($pdo);
     $stmt = $pdo->prepare(
-        "SELECT rt.user_id, rt.token_hash, u.name, u.role, u.avatar_url, u.google_id, u.is_locked
+        "SELECT rt.user_id, rt.token_hash, u.name, u.role, u.avatar_url, u.google_id, u.is_locked, u.is_approved
          FROM user_remember_tokens rt
          INNER JOIN users u ON u.id = rt.user_id
          WHERE rt.selector = ? AND rt.expires_at > NOW()
@@ -76,7 +76,7 @@ function restoreRememberedGoogleLogin(PDO $pdo): bool
     $stmt->execute([$token['selector']]);
     $user = $stmt->fetch();
 
-    if (!$user || !empty($user['is_locked']) || empty($user['google_id'])
+    if (!$user || !empty($user['is_locked']) || empty($user['is_approved']) || empty($user['google_id'])
         || !hash_equals((string) $user['token_hash'], hash('sha256', $token['validator']))) {
         $pdo->prepare("DELETE FROM user_remember_tokens WHERE selector = ?")->execute([$token['selector']]);
         clearRememberLoginCookie();

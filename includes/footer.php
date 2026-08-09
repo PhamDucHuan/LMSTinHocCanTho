@@ -168,18 +168,21 @@
             const sidebar = document.querySelector('.sidebar');
             const mainContent = document.getElementById('main-content');
 
-            document.querySelectorAll('[data-sidebar-group]').forEach(group => {
-                const key = `lms_sidebar_group_${group.dataset.sidebarGroup}`;
-                const toggle = group.querySelector('.sidebar-group-toggle');
-                const saved = localStorage.getItem(key);
-                const collapsed = saved === null ? !group.classList.contains('has-active') : saved === 'collapsed';
+            const sidebarGroups = Array.from(document.querySelectorAll('[data-sidebar-group]'));
+            const setSidebarGroupCollapsed = (group, collapsed) => {
                 group.classList.toggle('collapsed', collapsed);
-                toggle?.setAttribute('aria-expanded', String(!collapsed));
+                group.querySelector('.sidebar-group-toggle')
+                    ?.setAttribute('aria-expanded', String(!collapsed));
+            };
+
+            // Mỗi lần chuyển trang, chỉ mở nhóm chứa mục đang hoạt động.
+            // Không dùng trạng thái cũ để tránh mở nhầm một nhóm khác.
+            sidebarGroups.forEach(group => {
+                setSidebarGroupCollapsed(group, !group.classList.contains('has-active'));
+                const toggle = group.querySelector('.sidebar-group-toggle');
                 toggle?.addEventListener('click', () => {
-                    const willCollapse = !group.classList.contains('collapsed');
-                    group.classList.toggle('collapsed', willCollapse);
-                    toggle.setAttribute('aria-expanded', String(!willCollapse));
-                    localStorage.setItem(key, willCollapse ? 'collapsed' : 'expanded');
+                    const willExpand = group.classList.contains('collapsed');
+                    setSidebarGroupCollapsed(group, !willExpand);
                 });
             });
             

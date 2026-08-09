@@ -486,8 +486,14 @@ if (isset($pdo) && $pdo instanceof PDO && !empty($_SESSION['user_id'])) {
             transition: 0.3s;
         }
         .menu-item i { font-size: 20px; }
-        .menu-item:hover, .menu-item.active {
-            background: rgba(255,255,255,0.05); color: var(--primary); border-right: 3px solid var(--primary);
+        .menu-item:hover {
+            background: rgba(255,255,255,0.05); color: var(--primary);
+        }
+        .menu-item.active {
+            background: rgba(var(--primary-rgb),0.12);
+            color: var(--primary);
+            border-left: 3px solid var(--primary);
+            padding-left: 21px;
         }
         .sidebar-group { border-bottom:1px solid var(--border-color); }
         .sidebar-group:first-child { border-top:1px solid var(--border-color); }
@@ -505,6 +511,7 @@ if (isset($pdo) && $pdo instanceof PDO && !empty($_SESSION['user_id'])) {
         .sidebar-group-items-inner { min-height:0; overflow:hidden; padding-bottom:7px; }
         .sidebar-group.collapsed .sidebar-group-items { grid-template-rows:0fr; opacity:0; }
         .sidebar-group .menu-item { padding:10px 20px 10px 29px; font-size:14px; }
+        .sidebar-group .menu-item.active { padding-left:26px; }
         
         .sidebar-footer { padding: 20px; border-top: 1px solid rgba(255,255,255,0.05); }
         .user-menu-container { position: relative; }
@@ -786,6 +793,7 @@ if (isset($pdo) && $pdo instanceof PDO && !empty($_SESSION['user_id'])) {
             .table-responsive table { min-width:560px; }
         }
     </style>
+    <link rel="stylesheet" href="../assets/css/sidebar-modern.css?v=1">
     <script>
         (function () {
             try {
@@ -887,8 +895,8 @@ if (isset($pdo) && $pdo instanceof PDO && !empty($_SESSION['user_id'])) {
                 foreach ($group['items'] as $item) {
                     if (in_array($current_page, $item['match'], true)) { $groupActive = true; break; }
                 }
-                echo '<section class="sidebar-group' . ($groupActive ? ' has-active' : '') . '" data-sidebar-group="' . htmlspecialchars($group['id']) . '">';
-                echo '<button type="button" class="sidebar-group-toggle" aria-expanded="true"><i class="bx ' . htmlspecialchars($group['icon']) . '"></i><span>' . htmlspecialchars($group['label']) . '</span><i class="bx bx-chevron-down group-chevron"></i></button>';
+                echo '<section class="sidebar-group' . ($groupActive ? ' has-active' : ' collapsed') . '" data-sidebar-group="' . htmlspecialchars($group['id']) . '">';
+                echo '<button type="button" class="sidebar-group-toggle" aria-expanded="' . ($groupActive ? 'true' : 'false') . '"><i class="bx ' . htmlspecialchars($group['icon']) . '"></i><span>' . htmlspecialchars($group['label']) . '</span><i class="bx bx-chevron-down group-chevron"></i></button>';
                 echo '<div class="sidebar-group-items"><div class="sidebar-group-items-inner">';
                 foreach ($group['items'] as $menu) {
                     $isActive = in_array($current_page, $menu['match'], true) ? 'active' : '';

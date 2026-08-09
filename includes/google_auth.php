@@ -46,6 +46,13 @@ if (isset($_GET['code'])) {
         exit;
     }
 
+
+    if ($user && !isAccountApproved($pdo, (int) $user['id'])) {
+        $_SESSION['error'] = 'Tài khoản Google đang chờ Admin duyệt. Bạn chưa thể đăng nhập.';
+        header('Location: ../index.php');
+        exit;
+    }
+
     if($user) {
         // Liên kết Google và làm mới avatar vì người dùng có thể đổi ảnh Google.
         $update = $pdo->prepare("UPDATE users SET google_id = COALESCE(NULLIF(google_id, ''), ?), avatar_url = ? WHERE id = ?");
@@ -57,13 +64,12 @@ if (isset($_GET['code'])) {
         $_SESSION['user_avatar'] = $avatar_url;
     } else {
         // Đăng ký mới với mặc định là học viên
-        $insert = $pdo->prepare("INSERT INTO users (name, email, google_id, avatar_url, role) VALUES (?, ?, ?, ?, 'student')");
+        $insert = $pdo->prepare("INSERT INTO users (name, email, google_id, avatar_url, role, is_approved) VALUES (?, ?, ?, ?, 'student', 0)");
         $insert->execute([$name, $email, $google_id, $avatar_url]);
-        
-        $_SESSION['user_id'] = $pdo->lastInsertId();
-        $_SESSION['user_name'] = $name;
-        $_SESSION['user_role'] = 'student';
-        $_SESSION['user_avatar'] = $avatar_url;
+
+        $_SESSION['success'] = 'Đã ghi nhận tài khoản Google. Vui lòng chờ Admin duyệt trước khi đăng nhập.';
+        header('Location: ../index.php');
+        exit;
     }
     
     session_regenerate_id(true);
