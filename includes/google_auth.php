@@ -4,6 +4,7 @@ require_once __DIR__ . '/remember_login.php';
 secureSessionStart();
 require_once '../config/database.php';
 require_once __DIR__ . '/account_lock.php';
+require_once __DIR__ . '/login_history.php';
 
 // Tệp xử lý đăng nhập bằng Google
 // Tính năng này đang được thiết lập mô phỏng. Bắt buộc phải có Client ID từ Google Cloud.
@@ -41,6 +42,7 @@ if (isset($_GET['code'])) {
     $user = $stmt->fetch();
     
     if ($user && isAccountLocked($pdo, (int) $user['id'])) {
+        recordLoginHistory($pdo, (int) $user['id'], 'login_google_failed_locked', 'google', $email, ['reason' => 'account_locked']);
         $_SESSION['error'] = 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.';
         header('Location: ../index.php');
         exit;
@@ -48,6 +50,7 @@ if (isset($_GET['code'])) {
 
 
     if ($user && !isAccountApproved($pdo, (int) $user['id'])) {
+        recordLoginHistory($pdo, (int) $user['id'], 'login_google_failed_pending', 'google', $email, ['reason' => 'awaiting_admin_approval']);
         $_SESSION['error'] = 'Tài khoản Google đang chờ Admin duyệt. Bạn chưa thể đăng nhập.';
         header('Location: ../index.php');
         exit;
@@ -62,6 +65,7 @@ if (isset($_GET['code'])) {
         $_SESSION['user_name'] = $user['name'];
         $_SESSION['user_role'] = $user['role'];
         $_SESSION['user_avatar'] = $avatar_url;
+        recordLoginHistory($pdo, (int) $user['id'], 'login_google_success', 'google', $email);
     } else {
         // Đăng ký mới với mặc định là học viên
         $insert = $pdo->prepare("INSERT INTO users (name, email, google_id, avatar_url, role, is_approved) VALUES (?, ?, ?, ?, 'student', 0)");

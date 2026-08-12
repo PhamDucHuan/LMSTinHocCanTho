@@ -14,6 +14,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verifyCsrfToken();
     $targetUserId = (int) ($_POST['user_id'] ?? 0);
     $action = (string) ($_POST['action'] ?? 'change_role');
+    $returnPage = max(1, (int) ($_POST['return_page'] ?? 1));
+    $returnLocation = 'users.php?page=' . $returnPage;
 
     if ($action === 'approve_account' && $targetUserId > 0) {
         $stmt = $pdo->prepare('SELECT id, name, email, is_approved FROM users WHERE id = ? LIMIT 1');
@@ -37,7 +39,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ]);
             $_SESSION['success'] = 'Đã duyệt tài khoản. Người dùng được cấp quyền Học viên.';
         }
-        header('Location: users.php');
+        header('Location: ' . $returnLocation);
         exit;
     }
 
@@ -56,7 +58,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $activeAdmins = (int) $pdo->query("SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_locked = 0")->fetchColumn();
                     if ($activeAdmins <= 1) {
                         $_SESSION['error'] = 'Không thể khóa quản trị viên hoạt động cuối cùng.';
-                        header('Location: users.php');
+                        header('Location: ' . $returnLocation);
                         exit;
                     }
                 }
@@ -75,7 +77,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $_SESSION['success'] = $willLock ? 'Đã khóa tài khoản thành công.' : 'Đã mở khóa tài khoản thành công.';
             }
         }
-        header('Location: users.php');
+        header('Location: ' . $returnLocation);
         exit;
     }
 
@@ -93,16 +95,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $_SESSION['error'] = 'Bạn phải duyệt tài khoản trước khi thay đổi phân quyền.';
             }
         }
-        header('Location: users.php');
+        header('Location: ' . $returnLocation);
         exit;
     }
 }
 
-$users = $pdo->query('SELECT * FROM users ORDER BY created_at DESC')->fetchAll();
-$pendingUsers = array_values(array_filter(
-    $users,
-    static fn(array $user): bool => empty($user['is_approved'])
-));
+$usersPerPage = 25;
+$totalUsers = (int) $pdo->query('SELECT COUNT(*) FROM users')->fetchColumn();
+$totalPages = max(1, (int) ceil($totalUsers / $usersPerPage));
+$currentPage = max(1, min($totalPages, (int) ($_GET['page'] ?? 1)));
+$offset = ($currentPage - 1) * $usersPerPage;
+$users = $pdo->query(
+    'SELECT * FROM users ORDER BY created_at DESC, id DESC LIMIT ' . $usersPerPage . ' OFFSET ' . $offset
+)->fetchAll();
+$pendingCount = (int) $pdo->query('SELECT COUNT(*) FROM users WHERE is_approved = 0')->fetchColumn();
+$pendingUsers = $pdo->query(
+    'SELECT * FROM users WHERE is_approved = 0 ORDER BY created_at, id LIMIT 100'
+)->fetchAll();
+$pageUrl = static fn(int $page): string => '?page=' . max(1, $page);
 $page_title = 'Quản lý Tài khoản';
 require_once '../includes/header.php';
 ?>
@@ -126,7 +136,7 @@ require_once '../includes/header.php';
         </div>
         <button type="button" class="btn btn-primary" id="open-approval-dialog">
             <i class='bx bx-list-check'></i> Yêu cầu chờ duyệt
-            <span class="approval-count"><?php echo count($pendingUsers); ?></span>
+            <span class="approval-count"><?php echo $pendingCount; ?></span>
         </button>
     </div>
 
@@ -134,7 +144,7 @@ require_once '../includes/header.php';
         <div class="approval-dialog-head">
             <div>
                 <h2><i class='bx bx-user-check'></i> Yêu cầu đăng ký</h2>
-                <p><?php echo count($pendingUsers); ?> tài khoản đang chờ Admin duyệt</p>
+                <p><?php echo $pendingCount; ?> tài khoản đang chờ Admin duyệt</p>
             </div>
             <button type="button" class="approval-close" id="close-approval-dialog" aria-label="Đóng"><i class='bx bx-x'></i></button>
         </div>
@@ -149,6 +159,7 @@ require_once '../includes/header.php';
                     </div>
                     <form method="post">
                         <?php echo csrfField(); ?>
+                        <input type="hidden" name="return_page" value="<?php echo $currentPage; ?>">
                         <input type="hidden" name="action" value="approve_account">
                         <input type="hidden" name="user_id" value="<?php echo (int) $pendingUser['id']; ?>">
                         <button class="btn btn-primary"><i class='bx bx-check'></i> Duyệt</button>
@@ -161,7 +172,7 @@ require_once '../includes/header.php';
         </div>
     </dialog>
 
-    <p>Tổng số thành viên: <?php echo count($users); ?></p>
+    <p>Tổng số thành viên: <?php echo number_format($totalUsers); ?> · Trang <?php echo $currentPage; ?>/<?php echo $totalPages; ?></p>
     <div style="overflow-x:auto;">
     <table>
         <thead><tr><th>Họ tên</th><th>Email</th><th>Ngày tham gia</th><th>Phân quyền</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
@@ -183,6 +194,7 @@ require_once '../includes/header.php';
                     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
                         <form method="post" style="margin:0;display:flex;gap:8px;align-items:center;">
                             <?php echo csrfField(); ?>
+                            <input type="hidden" name="return_page" value="<?php echo $currentPage; ?>">
                             <input type="hidden" name="action" value="change_role">
                             <input type="hidden" name="user_id" value="<?php echo (int) $user['id']; ?>">
                             <select name="role" style="padding:8px;width:120px;font-size:13px;" <?php echo ($isSelf || empty($user['is_approved'])) ? 'disabled' : ''; ?>>
@@ -195,6 +207,7 @@ require_once '../includes/header.php';
                         <?php if (empty($user['is_approved'])): ?>
                             <form method="post" style="margin:0;">
                                 <?php echo csrfField(); ?>
+                                <input type="hidden" name="return_page" value="<?php echo $currentPage; ?>">
                                 <input type="hidden" name="action" value="approve_account">
                                 <input type="hidden" name="user_id" value="<?php echo (int) $user['id']; ?>">
                                 <button class="btn btn-primary" style="padding:8px 12px;font-size:13px;"><i class='bx bx-user-check'></i> Duyệt</button>
@@ -202,6 +215,7 @@ require_once '../includes/header.php';
                         <?php endif; ?>
                         <form method="post" style="margin:0;" onsubmit="return confirm('<?php echo !empty($user['is_locked']) ? 'Mở khóa tài khoản này?' : 'Khóa tài khoản này? Người dùng sẽ bị đăng xuất.'; ?>');">
                             <?php echo csrfField(); ?>
+                            <input type="hidden" name="return_page" value="<?php echo $currentPage; ?>">
                             <input type="hidden" name="action" value="toggle_lock">
                             <input type="hidden" name="user_id" value="<?php echo (int) $user['id']; ?>">
                             <button class="btn btn-outline" style="padding:8px 12px;font-size:13px;" <?php echo $isSelf ? 'disabled title="Không thể tự khóa"' : ''; ?>>
@@ -216,6 +230,15 @@ require_once '../includes/header.php';
         </tbody>
     </table>
     </div>
+    <?php if ($totalPages > 1): ?>
+        <nav class="account-pagination" aria-label="Phân trang tài khoản">
+            <a class="btn btn-outline<?php echo $currentPage <= 1 ? ' is-disabled' : ''; ?>" href="<?php echo htmlspecialchars($pageUrl($currentPage - 1)); ?>"><i class='bx bx-chevron-left'></i> Trước</a>
+            <?php for ($page = max(1, $currentPage - 2); $page <= min($totalPages, $currentPage + 2); $page++): ?>
+                <a class="btn <?php echo $page === $currentPage ? 'btn-primary' : 'btn-outline'; ?>" href="<?php echo htmlspecialchars($pageUrl($page)); ?>"><?php echo $page; ?></a>
+            <?php endfor; ?>
+            <a class="btn btn-outline<?php echo $currentPage >= $totalPages ? ' is-disabled' : ''; ?>" href="<?php echo htmlspecialchars($pageUrl($currentPage + 1)); ?>">Sau <i class='bx bx-chevron-right'></i></a>
+        </nav>
+    <?php endif; ?>
 </div>
 
 <style>
@@ -231,6 +254,7 @@ require_once '../includes/header.php';
 .approval-request{display:grid;grid-template-columns:44px minmax(0,1fr) auto;align-items:center;gap:13px;padding:14px;border:1px solid var(--border-color);border-radius:9px;background:rgba(255,255,255,.025)}
 .approval-avatar{display:grid;place-items:center;width:44px;height:44px;border-radius:9px;background:rgba(var(--primary-rgb),.12);color:var(--primary);font-size:24px}.approval-person{display:grid;gap:2px;min-width:0}.approval-person strong,.approval-person span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.approval-person span,.approval-person small{color:var(--text-muted)}.approval-person small{margin-top:3px}
 .approval-request form{margin:0}.approval-empty{display:grid;justify-items:center;gap:6px;padding:38px 20px;text-align:center;color:var(--text-muted)}.approval-empty i{color:var(--success);font-size:42px}.approval-empty strong{color:var(--text-main)}
+.account-pagination{display:flex;justify-content:center;align-items:center;gap:8px;flex-wrap:wrap;margin-top:20px}.account-pagination .is-disabled{pointer-events:none;opacity:.45}
 @media(max-width:650px){.approval-toolbar{align-items:stretch;flex-direction:column}.approval-toolbar .btn{width:100%}.approval-request{grid-template-columns:40px minmax(0,1fr)}.approval-request form{grid-column:1/-1}.approval-request form .btn{width:100%}}
 </style>
 <script>

@@ -3,6 +3,8 @@ require_once __DIR__ . '/security.php';
 secureSessionStart();
 require_once '../config/database.php';
 require_once __DIR__ . '/account_lock.php';
+require_once __DIR__ . '/audit.php';
+require_once __DIR__ . '/login_history.php';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verifyCsrfToken();
@@ -62,12 +64,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $user = $stmt->fetch();
 
         if ($user && isAccountLocked($pdo, (int) $user['id'])) {
+            recordLoginHistory($pdo, (int) $user['id'], 'login_failed_locked', 'password', $email, ['reason' => 'account_locked']);
             $_SESSION['error'] = 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.';
             header('Location: ../index.php');
             exit;
         }
 
         if ($user && !isAccountApproved($pdo, (int) $user['id'])) {
+            recordLoginHistory($pdo, (int) $user['id'], 'login_failed_pending', 'password', $email, ['reason' => 'awaiting_admin_approval']);
             $_SESSION['error'] = 'Tài khoản đang chờ Admin duyệt. Bạn chưa thể đăng nhập.';
             header('Location: ../index.php');
             exit;
@@ -79,6 +83,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['user_name'] = $user['name'];
             $_SESSION['user_role'] = $user['role'];
             $_SESSION['user_avatar'] = $user['avatar_url'] ?? null;
+            recordLoginHistory($pdo, (int) $user['id'], 'login_success', 'password', $email);
 
             if ($user['role'] === 'admin') {
                 header('Location: ../admin/dashboard.php');
@@ -89,6 +94,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             exit;
         } else {
+            recordLoginHistory($pdo, $user ? (int) $user['id'] : null, 'login_failed', 'password', $email, ['reason' => 'invalid_credentials']);
             $_SESSION['error'] = 'Email hoặc mật khẩu không đúng.';
             header('Location: ../index.php');
             exit;

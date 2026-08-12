@@ -163,6 +163,18 @@
                     input.type = 'hidden'; input.name = 'csrf_token'; input.value = csrf; form.appendChild(input);
                 }
             });
+            const sendPresenceHeartbeat = () => {
+                if (document.visibilityState !== 'visible') return;
+                fetch('../includes/presence_heartbeat.php', {
+                    method: 'POST', credentials: 'same-origin', cache: 'no-store', keepalive: true,
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                }).catch(() => {});
+            };
+            sendPresenceHeartbeat();
+            setInterval(sendPresenceHeartbeat, 60000);
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') sendPresenceHeartbeat();
+            });
             const sidebarToggleOpen = document.getElementById('sidebar-toggle-open');
             const sidebarToggleClose = document.getElementById('sidebar-toggle-close');
             const sidebar = document.querySelector('.sidebar');
@@ -175,14 +187,13 @@
                     ?.setAttribute('aria-expanded', String(!collapsed));
             };
 
-            // Mỗi lần chuyển trang, chỉ mở nhóm chứa mục đang hoạt động.
-            // Không dùng trạng thái cũ để tránh mở nhầm một nhóm khác.
             sidebarGroups.forEach(group => {
-                setSidebarGroupCollapsed(group, !group.classList.contains('has-active'));
+                const key = `lms_sidebar_group_${group.dataset.sidebarGroup}`;
                 const toggle = group.querySelector('.sidebar-group-toggle');
                 toggle?.addEventListener('click', () => {
                     const willExpand = group.classList.contains('collapsed');
                     setSidebarGroupCollapsed(group, !willExpand);
+                    localStorage.setItem(key, willExpand ? 'expanded' : 'collapsed');
                 });
             });
             
@@ -235,6 +246,145 @@
                 wrapper.appendChild(table);
             });
         });
+    </script>
+
+    <!-- Thông báo nền nhẹ: polling ngắn, tự dừng khi tab không hoạt động. -->
+    <style>
+        #lms-toast-container {
+            position: fixed; bottom: 90px; right: 24px; z-index: 1300;
+            display: flex; flex-direction: column; gap: 10px;
+            pointer-events: none;
+        }
+        .lms-toast {
+            pointer-events: all;
+            display: flex; align-items: flex-start; gap: 12px;
+            padding: 14px 16px;
+            background: var(--glass-bg, rgba(30,41,59,.98));
+            backdrop-filter: blur(14px);
+            border: 1px solid rgba(255,255,255,.1);
+            border-left: 3px solid var(--primary);
+            border-radius: 12px;
+            box-shadow: 0 8px 28px rgba(0,0,0,.35);
+            min-width: 280px; max-width: 360px;
+            animation: toastIn .3s cubic-bezier(.34,1.56,.64,1) both;
+        }
+        .lms-toast.removing { animation: toastOut .25s ease both; }
+        @keyframes toastIn  { from { opacity:0; transform:translateX(20px) scale(.95); } to { opacity:1; transform:none; } }
+        @keyframes toastOut { from { opacity:1; } to { opacity:0; transform:translateX(20px); } }
+        .lms-toast-icon { font-size: 20px; flex-shrink: 0; }
+        .lms-toast-body { flex: 1; min-width: 0; }
+        .lms-toast-title { font-weight: 700; font-size: 13px; color: var(--text-main, #f8fafc); margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .lms-toast-msg   { font-size: 12px; color: var(--text-muted, #94a3b8); }
+        .lms-toast-close { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 16px; line-height: 1; flex-shrink: 0; }
+    </style>
+    <div id="lms-toast-container" aria-live="polite" aria-label="Thông báo"></div>
+
+    <script>
+    (function () {
+        'use strict';
+        const toastContainer = document.getElementById('lms-toast-container');
+        const seenIds = new Set();
+        let pollTimer = null;
+        let retryDelay = 30000;
+        let lastUnread = -1;
+
+        function updateBadge(count) {
+            const badge = document.querySelector('[data-notif-badge]');
+            if (!badge) return;
+            badge.textContent = count > 0 ? (count > 99 ? '99+' : count) : '';
+            badge.style.display = count > 0 ? 'grid' : 'none';
+        }
+
+        function showToast(notif) {
+            if (!toastContainer) return;
+            const icons = { 'grade': '📝', 'system': '🔔', 'course': '📚', 'quiz': '📋' };
+            const icon  = icons[notif.type] || '🔔';
+            const toast = document.createElement('div');
+            toast.className = 'lms-toast';
+            toast.setAttribute('role', 'alert');
+            toast.innerHTML =
+                `<span class="lms-toast-icon">${icon}</span>
+                 <div class="lms-toast-body">
+                     <div class="lms-toast-title">${notif.title.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
+                     ${notif.message ? `<div class="lms-toast-msg">${String(notif.message).slice(0,100).replace(/</g,'&lt;')}</div>` : ''}
+                 </div>
+                 <button class="lms-toast-close" aria-label="Đóng">✕</button>`;
+            toast.querySelector('.lms-toast-close').addEventListener('click', () => removeToast(toast));
+            if (notif.link) toast.style.cursor = 'pointer';
+            toast.addEventListener('click', (e) => {
+                if (e.target.closest('.lms-toast-close')) return;
+                if (notif.link) window.location.href = notif.link;
+            });
+            toastContainer.appendChild(toast);
+            setTimeout(() => removeToast(toast), 6000);
+        }
+
+        function removeToast(el) {
+            el.classList.add('removing');
+            el.addEventListener('animationend', () => el.remove(), { once: true });
+        }
+
+        function handleNotificationData(data) {
+            try {
+                const payload = JSON.parse(data);
+                if (payload.error) return;
+
+                // Update bell badge
+                if (payload.unread !== lastUnread) {
+                    lastUnread = payload.unread;
+                    updateBadge(payload.unread);
+                }
+
+                // Show toast for genuinely new notifications
+                if (Array.isArray(payload.notifications)) {
+                    for (const notif of payload.notifications) {
+                        if (!seenIds.has(notif.id)) {
+                            seenIds.add(notif.id);
+                            // Don't toast on first load (seenIds was empty — all are "new" but already exist)
+                            if (seenIds.size > payload.notifications.length) {
+                                showToast(notif);
+                            }
+                        }
+                    }
+                    // After first batch, subsequent new ones will toast
+                    if (seenIds.size === 0 && payload.notifications.length === 0) {
+                        seenIds.add('_init');
+                    }
+                }
+            } catch (_) {}
+        }
+
+        function scheduleNotificationPoll(delay = 30000) {
+            clearTimeout(pollTimer);
+            pollTimer = setTimeout(pollNotifications, delay);
+        }
+
+        async function pollNotifications() {
+            // Tab nền không tạo thêm truy vấn. Khi người dùng quay lại sẽ cập nhật ngay.
+            if (document.hidden) {
+                scheduleNotificationPoll(30000);
+                return;
+            }
+            try {
+                const response = await fetch('../includes/sse_notifications.php', {
+                    cache: 'no-store',
+                    headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
+                });
+                if (!response.ok) throw new Error('notification_poll_failed');
+                handleNotificationData(await response.text());
+                retryDelay = 30000;
+                scheduleNotificationPoll(retryDelay);
+            } catch (_) {
+                retryDelay = Math.min(120000, retryDelay * 2);
+                scheduleNotificationPoll(retryDelay);
+            }
+        }
+
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) scheduleNotificationPoll(500);
+        });
+        pollNotifications();
+    })();
     </script>
 </body>
 </html>

@@ -32,10 +32,16 @@ if (!isset($_SESSION['user_id']) || $_SESSION['user_role'] !== 'admin') {
     exit;
 }
 
-// Fetch all assignments with course info
-$stmt = $pdo->prepare("SELECT a.*, c.title as course_title, u.name as teacher_name FROM assignments a LEFT JOIN courses c ON a.course_id = c.id JOIN users u ON a.teacher_id = u.id ORDER BY a.priority_order, a.created_at, a.id");
+// Chỉ lấy dữ liệu của trang hiện tại để danh sách vẫn nhanh khi có nhiều bài.
+$assignmentsPerPage = 24;
+$totalAssignments = (int) $pdo->query('SELECT COUNT(*) FROM assignments')->fetchColumn();
+$totalPages = max(1, (int) ceil($totalAssignments / $assignmentsPerPage));
+$currentPage = max(1, min($totalPages, (int) ($_GET['page'] ?? 1)));
+$offset = ($currentPage - 1) * $assignmentsPerPage;
+$stmt = $pdo->prepare("SELECT a.*, c.title as course_title, u.name as teacher_name FROM assignments a LEFT JOIN courses c ON a.course_id = c.id JOIN users u ON a.teacher_id = u.id ORDER BY a.priority_order, a.created_at, a.id LIMIT {$assignmentsPerPage} OFFSET {$offset}");
 $stmt->execute();
 $assignments = $stmt->fetchAll();
+$pageUrl = static fn(int $page): string => '?page=' . max(1, $page);
 
 $grouped_assignments = ['assignment' => [], 'exam' => []];
 foreach ($assignments as $a) {
@@ -57,6 +63,11 @@ require_once '../includes/header.php';
                 <?php echo $_SESSION['success']; unset($_SESSION['success']); ?>
             </div>
         <?php endif; ?>
+
+    <div class="assignment-list-summary">
+        <strong><?php echo number_format($totalAssignments); ?> bài</strong>
+        <span>Trang <?php echo $currentPage; ?>/<?php echo $totalPages; ?> · Hiển thị tối đa <?php echo $assignmentsPerPage; ?> bài mỗi trang</span>
+    </div>
         <?php if(isset($_SESSION['error'])): ?>
             <div style="background:rgba(239,68,68,.16);color:#fca5a5;padding:15px;border-radius:8px;margin-bottom:20px;"><?php echo htmlspecialchars($_SESSION['error']); unset($_SESSION['error']); ?></div>
         <?php endif; ?>
@@ -76,13 +87,14 @@ require_once '../includes/header.php';
             <?php foreach ($assigns as $assignmentIndex => $assignment): ?>
                 <div class="card" style="position: relative;">
                     <form method="POST" action="../teacher/delete_assignment.php" style="position: absolute; top: 15px; right: 15px; margin: 0; z-index: 10;" onsubmit="return confirm('Bạn có chắc chắn muốn xóa bài tập này? Toàn bộ bài nộp của học viên sẽ bị xóa!');">
+                        <?php echo csrfField(); ?>
                         <input type="hidden" name="id" value="<?php echo $assignment['id']; ?>">
                         <button type="submit" style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); color: var(--danger); width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.background='var(--danger)'; this.style.color='#fff';" onmouseout="this.style.background='rgba(239, 68, 68, 0.1)'; this.style.color='var(--danger)';"><i class='bx bx-trash'></i></button>
                     </form>
                     <div class="priority-controls" aria-label="Sắp xếp ưu tiên">
-                        <span>#<?php echo $assignmentIndex + 1; ?></span>
-                        <form method="POST" action="../teacher/reorder_assignment.php"><input type="hidden" name="id" value="<?php echo $assignment['id']; ?>"><input type="hidden" name="direction" value="up"><input type="hidden" name="return_to" value="admin"><button type="submit" title="Đưa lên ưu tiên cao hơn" <?php echo $assignmentIndex === 0 ? 'disabled' : ''; ?>><i class='bx bx-up-arrow-alt'></i></button></form>
-                        <form method="POST" action="../teacher/reorder_assignment.php"><input type="hidden" name="id" value="<?php echo $assignment['id']; ?>"><input type="hidden" name="direction" value="down"><input type="hidden" name="return_to" value="admin"><button type="submit" title="Đưa xuống ưu tiên thấp hơn" <?php echo $assignmentIndex === count($assigns) - 1 ? 'disabled' : ''; ?>><i class='bx bx-down-arrow-alt'></i></button></form>
+                        <span>#<?php echo max(1, (int) $assignment['priority_order']); ?></span>
+                        <form method="POST" action="../teacher/reorder_assignment.php"><?php echo csrfField(); ?><input type="hidden" name="id" value="<?php echo $assignment['id']; ?>"><input type="hidden" name="direction" value="up"><input type="hidden" name="return_to" value="admin"><input type="hidden" name="return_page" value="<?php echo $currentPage; ?>"><button type="submit" title="Đưa lên ưu tiên cao hơn"><i class='bx bx-up-arrow-alt'></i></button></form>
+                        <form method="POST" action="../teacher/reorder_assignment.php"><?php echo csrfField(); ?><input type="hidden" name="id" value="<?php echo $assignment['id']; ?>"><input type="hidden" name="direction" value="down"><input type="hidden" name="return_to" value="admin"><input type="hidden" name="return_page" value="<?php echo $currentPage; ?>"><button type="submit" title="Đưa xuống ưu tiên thấp hơn"><i class='bx bx-down-arrow-alt'></i></button></form>
                     </div>
                     <div class="teacher-badge" style="margin-right: 40px; display: inline-block; padding: 4px 8px; border-radius: 4px; background: rgba(255,255,255,0.1); font-size: 12px; margin-bottom: 10px;"><i class='bx bxs-user-badge'></i> GV: <?php echo htmlspecialchars($assignment['teacher_name']); ?></div>
                     <h3><?php echo htmlspecialchars($assignment['title']); ?></h3>
@@ -97,8 +109,19 @@ require_once '../includes/header.php';
             <?php endforeach; ?>
         </div>
     <?php endforeach; ?>
+
         </section>
     <?php endforeach; ?>
+
+    <?php if ($totalPages > 1): ?>
+        <nav class="assignment-pagination" aria-label="Phân trang bài tập">
+            <a class="btn btn-outline<?php echo $currentPage <= 1 ? ' is-disabled' : ''; ?>" href="<?php echo htmlspecialchars($pageUrl($currentPage - 1)); ?>"><i class='bx bx-chevron-left'></i> Trước</a>
+            <?php for ($page = max(1, $currentPage - 2); $page <= min($totalPages, $currentPage + 2); $page++): ?>
+                <a class="btn <?php echo $page === $currentPage ? 'btn-primary' : 'btn-outline'; ?>" href="<?php echo htmlspecialchars($pageUrl($page)); ?>"><?php echo $page; ?></a>
+            <?php endfor; ?>
+            <a class="btn btn-outline<?php echo $currentPage >= $totalPages ? ' is-disabled' : ''; ?>" href="<?php echo htmlspecialchars($pageUrl($currentPage + 1)); ?>">Sau <i class='bx bx-chevron-right'></i></a>
+        </nav>
+    <?php endif; ?>
     
     <?php if (empty($assignments)): ?>
         <div class="empty-state">
@@ -115,6 +138,7 @@ require_once '../includes/header.php';
         .assignment-type-section .card-grid>.card{display:flex;flex-direction:column;height:100%;box-sizing:border-box}
         .assignment-type-section .card-grid>.card>.btn{margin-top:auto}
         .priority-controls{display:flex;align-items:center;gap:5px;margin:0 42px 12px 0;color:var(--text-muted);font-size:12px}.priority-controls form{margin:0}.priority-controls button{display:grid;place-items:center;width:28px;height:28px;padding:0;border:1px solid var(--border-color);border-radius:6px;background:rgba(255,255,255,.04);color:var(--text-color);cursor:pointer}.priority-controls button:hover:not(:disabled){border-color:var(--primary);color:var(--primary)}.priority-controls button:disabled{opacity:.3;cursor:not-allowed}
+        .assignment-list-summary{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:18px;padding:13px 16px;border:1px solid var(--border-color);border-radius:12px;background:rgba(var(--primary-rgb),.05)}.assignment-list-summary span{color:var(--text-muted);font-size:14px}.assignment-pagination{display:flex;justify-content:center;align-items:center;gap:8px;flex-wrap:wrap;margin:22px 0}.assignment-pagination .is-disabled{pointer-events:none;opacity:.45}
         @media(max-width:650px){.assignment-type-section{padding:14px}.assignment-type-title{font-size:23px}}
     </style>
 

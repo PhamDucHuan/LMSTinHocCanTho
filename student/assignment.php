@@ -22,7 +22,9 @@ if ($isAjaxRequest) {
         }
         echo json_encode([
             'success' => false,
-            'message' => 'Máy chủ gặp lỗi khi lưu dữ liệu. Vui lòng thử lại.'
+            'message' => $error instanceof AiGradingUnavailableException
+                ? $error->getMessage()
+                : 'Máy chủ gặp lỗi khi lưu dữ liệu. Vui lòng thử lại.'
         ], JSON_UNESCAPED_UNICODE);
         exit;
     });
@@ -117,6 +119,8 @@ if ($isAjaxRequest && ($_GET['action'] ?? '') === 'grading_job_status') {
         'module' => $job['module_name'],
         'status' => $job['status'],
         'attempts' => (int) $job['attempts'],
+        'created_at' => $job['created_at'],
+        'started_at' => $job['started_at'],
     ];
     if ($job['status'] === 'completed') {
         $result = applyCompletedGradingJob($pdo, $job);
@@ -687,9 +691,16 @@ require_once '../includes/header.php';
         .submission-actions{align-items:stretch}
         .submission-actions>form{display:flex;flex-direction:column;min-width:0}
         .submission-actions>form>button[type="submit"]{margin-top:auto}
+        .ai-grading-progress{width:220px;max-width:48vw;text-align:left;color:var(--text-main);font-size:12px;line-height:1.25}
+        .ai-grading-progress__top{display:flex;align-items:center;gap:6px;font-weight:700;white-space:nowrap}
+        .ai-grading-progress__top i{color:var(--primary)}
+        .ai-grading-progress__track{height:6px;overflow:hidden;margin-top:6px;border-radius:999px;background:rgba(148,163,184,.2);border:1px solid rgba(148,163,184,.18)}
+        .ai-grading-progress__bar{height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--primary),#22d3ee);box-shadow:0 0 12px rgba(var(--primary-rgb),.6);transition:width .7s ease}
+        .ai-grading-progress__hint{display:block;margin-top:4px;color:var(--text-muted);font-size:11px}
         @media(max-width:650px){
             .submission-actions{flex-direction:column}
             .submission-actions>form{width:100%}
+            .ai-grading-progress{width:100%;max-width:none}
         }
         .exam-timer { position: sticky; top: 14px; z-index: 50; display:flex; justify-content:center; align-items:center; gap:12px; padding:14px 20px; border-radius:12px; background:rgba(127,29,29,.96); border:1px solid rgba(248,113,113,.55); box-shadow:0 10px 30px rgba(0,0,0,.28); font-weight:700; }
         .exam-timer-value { font-variant-numeric: tabular-nums; font-size:24px; color:#fff; letter-spacing:1px; }
@@ -1470,9 +1481,37 @@ require_once '../includes/header.php';
                 }
             };
 
-            const waitForGradingJob = async (jobId, button) => {
+            const renderGradingProgress = (display, status, elapsedMs) => {
+                if (!display) return;
+                const processing = status === 'processing';
+                const seconds = Math.max(0, Math.floor(elapsedMs / 1000));
+                let percent = 10;
+                let label = 'Đang xếp hàng chấm';
+                let hint = 'Worker AI sẽ nhận bài trong giây lát';
+                if (processing && seconds < 15) {
+                    percent = 28; label = 'Đang phân tích file'; hint = 'Đọc cấu trúc, công thức và dữ liệu';
+                } else if (processing && seconds < 45) {
+                    percent = 52; label = 'Đang đối chiếu file mẫu'; hint = 'So khớp bài làm với đáp án/file chuẩn';
+                } else if (processing && seconds < 90) {
+                    percent = 76; label = 'AI đang chấm tiêu chí'; hint = 'Đánh giá chức năng và tạo nhận xét';
+                } else if (processing) {
+                    percent = Math.min(94, 82 + Math.floor((seconds - 90) / 20));
+                    label = 'Đang hoàn tất kết quả'; hint = 'Bài lớn có thể cần thêm ít phút';
+                }
+                display.dataset.score = '';
+                display.style.fontSize = 'inherit';
+                display.innerHTML = `<div class="ai-grading-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}">
+                    <div class="ai-grading-progress__top"><i class='bx ${processing ? 'bx-loader-alt bx-spin' : 'bx-time-five'}'></i><span>${label} · ${percent}%</span></div>
+                    <div class="ai-grading-progress__track"><div class="ai-grading-progress__bar" style="width:${percent}%"></div></div>
+                    <span class="ai-grading-progress__hint">${hint}</span>
+                </div>`;
+            };
+
+            const waitForGradingJob = async (jobId, button, scoreDisplay = null) => {
                 const startedAt = Date.now();
-                while (Date.now() - startedAt < 12 * 60 * 1000) {
+                renderGradingProgress(scoreDisplay, 'queued', 0);
+                // The job continues in the background; do not trap learners in a long modal.
+                while (Date.now() - startedAt < 3 * 60 * 1000) {
                     await new Promise(resolve => setTimeout(resolve, 1500));
                     const statusUrl = new URL(window.location.href);
                     statusUrl.searchParams.set('action', 'grading_job_status');
@@ -1486,13 +1525,14 @@ require_once '../includes/header.php';
                     if (status.status === 'failed' || !status.success) {
                         throw new Error(status.message || 'AI không thể hoàn thành yêu cầu chấm.');
                     }
+                    renderGradingProgress(scoreDisplay, status.status, Date.now() - startedAt);
                     if (button) {
                         button.innerHTML = status.status === 'processing'
                             ? "<i class='bx bx-loader-alt bx-spin'></i> AI đang chấm..."
                             : "<i class='bx bx-time-five'></i> Đang chờ chấm...";
                     }
                 }
-                throw new Error('Bài vẫn đang nằm trong hàng đợi. Bạn có thể tải lại trang để xem trạng thái sau.');
+                throw new Error('AI vẫn đang xử lý nền sau 3 phút. Bạn có thể tải lại trang sau ít phút để xem kết quả; không cần nộp lại bài.');
             };
 
             document.addEventListener('submit', async event => {
@@ -1530,7 +1570,7 @@ require_once '../includes/header.php';
                             scoreDisplay.style.fontSize = '14px';
                             scoreDisplay.innerHTML = "<i class='bx bx-time-five'></i> Đang chờ AI chấm";
                         }
-                        result = await waitForGradingJob(result.job_id, button);
+                        result = await waitForGradingJob(result.job_id, button, scoreDisplay);
                     }
 
                     if (result.action === 'graded') {
@@ -1561,14 +1601,14 @@ require_once '../includes/header.php';
                 if (scoreDisplay) {
                     scoreDisplay.dataset.score = '';
                     scoreDisplay.style.fontSize = '14px';
-                    scoreDisplay.innerHTML = "<i class='bx bx-loader-alt bx-spin'></i> AI đang chấm...";
+                    renderGradingProgress(scoreDisplay, 'processing', 0);
                 }
                 if (button) {
                     button.disabled = true;
                     button.innerHTML = "<i class='bx bx-loader-alt bx-spin'></i> AI đang chấm...";
                 }
                 try {
-                    const result = await waitForGradingJob(job.id, button);
+                    const result = await waitForGradingJob(job.id, button, scoreDisplay);
                     applyGradingResultToCard(card, result, button);
                     showLmsDialog(result.message, 'success', true);
                     window.lmsCelebrate?.();
@@ -1731,3 +1771,403 @@ require_once '../includes/header.php';
         </script>
 
 <?php require_once '../includes/footer.php'; ?>
+
+<?php if (!$previewMode && !$adminTestMode): ?>
+<!-- ============================================================
+     AI CHAT WIDGET — Trợ lý AI học tập
+     ============================================================ -->
+<style>
+/* ---- Floating Button ---- */
+#ai-chat-fab {
+    position: fixed;
+    bottom: 28px;
+    right: 28px;
+    z-index: 1200;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 20px 0 16px;
+    height: 52px;
+    border: none;
+    border-radius: 26px;
+    background: linear-gradient(135deg, var(--primary), #8b5cf6);
+    color: #fff;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 6px 24px rgba(99,102,241,.45);
+    transition: transform .2s ease, box-shadow .2s ease, opacity .2s ease;
+}
+#ai-chat-fab:hover { transform: translateY(-3px); box-shadow: 0 10px 32px rgba(99,102,241,.6); }
+#ai-chat-fab .fab-icon { font-size: 22px; line-height: 1; }
+#ai-chat-fab .fab-label { letter-spacing: .01em; }
+#ai-chat-fab .fab-badge {
+    position: absolute;
+    top: -4px; right: -4px;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: #10b981;
+    border: 2px solid var(--bg-dark, #0f172a);
+    display: none;
+}
+#ai-chat-fab.has-reply .fab-badge { display: block; }
+
+/* ---- Panel ---- */
+#ai-chat-panel {
+    position: fixed;
+    bottom: 92px;
+    right: 28px;
+    z-index: 1200;
+    width: min(420px, calc(100vw - 32px));
+    max-height: min(580px, calc(100vh - 120px));
+    display: flex;
+    flex-direction: column;
+    background: var(--glass-bg, rgba(30,41,59,.98));
+    backdrop-filter: blur(18px);
+    border: 1px solid rgba(255,255,255,.1);
+    border-radius: 18px;
+    box-shadow: 0 24px 64px rgba(0,0,0,.4);
+    overflow: hidden;
+    transform-origin: bottom right;
+    transition: transform .28s cubic-bezier(.34,1.56,.64,1), opacity .22s ease;
+}
+#ai-chat-panel[hidden] { display: none !important; }
+#ai-chat-panel.chat-enter { animation: chatEnter .28s cubic-bezier(.34,1.56,.64,1) both; }
+@keyframes chatEnter {
+    from { transform: scale(.8) translateY(16px); opacity: 0; }
+    to   { transform: scale(1) translateY(0);     opacity: 1; }
+}
+
+/* ---- Header ---- */
+#ai-chat-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 16px 12px;
+    background: linear-gradient(135deg, rgba(99,102,241,.25), rgba(139,92,246,.18));
+    border-bottom: 1px solid rgba(255,255,255,.08);
+    flex-shrink: 0;
+}
+.chat-header-avatar {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--primary), #8b5cf6);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+    flex-shrink: 0;
+}
+.chat-header-info { flex: 1; min-width: 0; }
+.chat-header-name { font-size: 14px; font-weight: 700; color: var(--text-main, #f8fafc); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-header-status { font-size: 11px; color: #10b981; display: flex; align-items: center; gap: 4px; }
+.chat-header-status::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #10b981; }
+#ai-chat-close {
+    background: none; border: none; color: var(--text-muted, #94a3b8);
+    font-size: 20px; cursor: pointer; padding: 4px; border-radius: 6px;
+    line-height: 1; transition: color .15s, background .15s;
+}
+#ai-chat-close:hover { color: var(--text-main); background: rgba(255,255,255,.07); }
+
+/* ---- Messages ---- */
+#ai-chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 14px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,.12) transparent;
+}
+.chat-bubble {
+    max-width: 88%;
+    padding: 10px 14px;
+    border-radius: 14px;
+    font-size: 13.5px;
+    line-height: 1.55;
+    word-break: break-word;
+    animation: bubbleIn .2s ease both;
+}
+@keyframes bubbleIn { from { opacity:0; transform: translateY(6px); } to { opacity:1; transform:none; } }
+.chat-bubble.user {
+    align-self: flex-end;
+    background: linear-gradient(135deg, var(--primary), #8b5cf6);
+    color: #fff;
+    border-bottom-right-radius: 4px;
+}
+.chat-bubble.assistant {
+    align-self: flex-start;
+    background: rgba(255,255,255,.07);
+    color: var(--text-main, #f8fafc);
+    border: 1px solid rgba(255,255,255,.08);
+    border-bottom-left-radius: 4px;
+}
+.chat-bubble.system-msg {
+    align-self: center;
+    background: rgba(99,102,241,.12);
+    color: var(--text-muted, #94a3b8);
+    font-size: 12px;
+    border-radius: 10px;
+    text-align: center;
+    max-width: 95%;
+}
+.chat-bubble.error-msg {
+    align-self: center;
+    background: rgba(239,68,68,.12);
+    color: #fca5a5;
+    font-size: 12px;
+    border: 1px solid rgba(239,68,68,.25);
+    border-radius: 10px;
+    text-align: center;
+    max-width: 95%;
+}
+/* Typing indicator */
+.typing-indicator {
+    display: flex; align-items: center; gap: 4px;
+    padding: 10px 14px;
+    background: rgba(255,255,255,.07);
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 14px;
+    border-bottom-left-radius: 4px;
+    align-self: flex-start;
+}
+.typing-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--text-muted, #94a3b8);
+    animation: typingBounce 1.2s infinite ease-in-out;
+}
+.typing-dot:nth-child(2) { animation-delay: .2s; }
+.typing-dot:nth-child(3) { animation-delay: .4s; }
+@keyframes typingBounce { 0%,60%,100% { transform: translateY(0); } 30% { transform: translateY(-6px); } }
+
+/* ---- Input area ---- */
+#ai-chat-form {
+    padding: 10px 12px 12px;
+    border-top: 1px solid rgba(255,255,255,.08);
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+    background: rgba(0,0,0,.15);
+}
+#ai-chat-input {
+    flex: 1;
+    padding: 10px 14px;
+    border: 1px solid rgba(255,255,255,.12);
+    border-radius: 22px;
+    background: rgba(255,255,255,.06);
+    color: var(--text-main, #f8fafc);
+    font-size: 13.5px;
+    outline: none;
+    resize: none;
+    min-height: 42px;
+    max-height: 120px;
+    line-height: 1.5;
+    transition: border-color .15s;
+    font-family: inherit;
+}
+#ai-chat-input:focus { border-color: var(--primary); }
+#ai-chat-input::placeholder { color: var(--text-muted, #94a3b8); }
+#ai-chat-send {
+    width: 42px; height: 42px;
+    border: none; border-radius: 50%;
+    background: linear-gradient(135deg, var(--primary), #8b5cf6);
+    color: #fff;
+    font-size: 18px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    transition: transform .15s, opacity .15s;
+    align-self: flex-end;
+}
+#ai-chat-send:hover { transform: scale(1.08); }
+#ai-chat-send:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+.chat-char-count {
+    font-size: 10px;
+    color: var(--text-muted);
+    text-align: right;
+    padding: 0 14px 2px;
+    flex-basis: 100%;
+}
+</style>
+
+<!-- FAB Button -->
+<button id="ai-chat-fab" aria-label="Mở trợ lý AI" aria-expanded="false">
+    <span class="fab-icon">🤖</span>
+    <span class="fab-label">Hỏi AI</span>
+    <span class="fab-badge"></span>
+</button>
+
+<!-- Chat Panel -->
+<div id="ai-chat-panel" hidden role="dialog" aria-label="Trợ lý AI học tập" aria-modal="false">
+    <div id="ai-chat-header">
+        <div class="chat-header-avatar">🤖</div>
+        <div class="chat-header-info">
+            <div class="chat-header-name">Trợ lý AI – <?php echo htmlspecialchars($assignment['title'] ?? 'Bài tập'); ?></div>
+            <div class="chat-header-status">Sẵn sàng hỗ trợ</div>
+        </div>
+        <button id="ai-chat-close" aria-label="Đóng chat">✕</button>
+    </div>
+    <div id="ai-chat-messages" role="log" aria-live="polite" aria-label="Lịch sử hội thoại"></div>
+    <form id="ai-chat-form" autocomplete="off">
+        <textarea id="ai-chat-input" rows="1"
+            placeholder="Hỏi về đề bài, cách làm…"
+            maxlength="2000"
+            aria-label="Nhập câu hỏi"></textarea>
+        <button type="submit" id="ai-chat-send" aria-label="Gửi">
+            <i class="bx bx-send"></i>
+        </button>
+    </form>
+</div>
+
+<script>
+(function () {
+    'use strict';
+
+    const ASSIGNMENT_ID  = <?php echo (int) $assignment_id; ?>;
+    const CSRF_TOKEN     = document.querySelector('meta[name="csrf-token"]')?.content || '';
+    const CHAT_ENDPOINT  = '../student/ajax_ai_chat.php';
+
+    const fab      = document.getElementById('ai-chat-fab');
+    const panel    = document.getElementById('ai-chat-panel');
+    const closeBtn = document.getElementById('ai-chat-close');
+    const messages = document.getElementById('ai-chat-messages');
+    const form     = document.getElementById('ai-chat-form');
+    const input    = document.getElementById('ai-chat-input');
+    const sendBtn  = document.getElementById('ai-chat-send');
+
+    let chatHistory = [];  // { role: 'user'|'assistant', content: string }[]
+    let isWaiting   = false;
+    let hasOpened   = false;
+
+    // ---- Toggle panel ----
+    function openPanel() {
+        panel.hidden = false;
+        panel.classList.add('chat-enter');
+        panel.addEventListener('animationend', () => panel.classList.remove('chat-enter'), { once: true });
+        fab.setAttribute('aria-expanded', 'true');
+        fab.classList.remove('has-reply');
+        input.focus();
+        if (!hasOpened) {
+            hasOpened = true;
+            appendBubble('system-msg',
+                '👋 Xin chào! Tôi là Trợ lý AI của LMS Tin học Cần Thơ.\n' +
+                'Tôi có thể giúp bạn hiểu đề bài và gợi ý hướng làm — nhưng sẽ không làm bài hộ bạn 😊'
+            );
+        }
+        scrollToBottom();
+    }
+
+    function closePanel() {
+        panel.hidden = true;
+        fab.setAttribute('aria-expanded', 'false');
+    }
+
+    fab.addEventListener('click', () => panel.hidden ? openPanel() : closePanel());
+    closeBtn.addEventListener('click', closePanel);
+
+    // ---- Render helpers ----
+    function renderMarkdown(text) {
+        return text
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\*(.+?)\*/g, '<em>$1</em>')
+            .replace(/\n/g, '<br>');
+    }
+
+    function appendBubble(type, text) {
+        const div = document.createElement('div');
+        div.className = 'chat-bubble ' + type;
+        div.innerHTML = renderMarkdown(text);
+        messages.appendChild(div);
+        scrollToBottom();
+        return div;
+    }
+
+    function showTyping() {
+        const el = document.createElement('div');
+        el.className = 'typing-indicator';
+        el.id = 'typing-indicator';
+        el.innerHTML = '<div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>';
+        messages.appendChild(el);
+        scrollToBottom();
+    }
+
+    function hideTyping() {
+        document.getElementById('typing-indicator')?.remove();
+    }
+
+    function scrollToBottom() {
+        requestAnimationFrame(() => { messages.scrollTop = messages.scrollHeight; });
+    }
+
+    // ---- Auto-resize textarea ----
+    input.addEventListener('input', () => {
+        input.style.height = 'auto';
+        input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+    });
+
+    // ---- Send on Enter (Shift+Enter = newline) ----
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            form.requestSubmit();
+        }
+    });
+
+    // ---- Submit ----
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const text = input.value.trim();
+        if (!text || isWaiting) return;
+
+        isWaiting = true;
+        sendBtn.disabled = true;
+        input.value = '';
+        input.style.height = '';
+
+        appendBubble('user', text);
+        chatHistory.push({ role: 'user', content: text });
+        showTyping();
+
+        try {
+            const res = await fetch(CHAT_ENDPOINT, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-Token': CSRF_TOKEN,
+                },
+                body: JSON.stringify({
+                    assignment_id: ASSIGNMENT_ID,
+                    message: text,
+                    history: chatHistory.slice(-6),
+                }),
+            });
+
+            const data = await res.json().catch(() => ({ status: 'error', message: 'Phản hồi không hợp lệ.' }));
+
+            hideTyping();
+
+            if (data.status === 'success' && data.reply) {
+                const reply = String(data.reply);
+                chatHistory.push({ role: 'assistant', content: reply });
+                appendBubble('assistant', reply);
+                // Pulse FAB badge when panel is closed
+                if (panel.hidden) {
+                    fab.classList.add('has-reply');
+                }
+            } else {
+                const msg = data.message || 'Đã xảy ra lỗi. Vui lòng thử lại.';
+                appendBubble('error-msg', '⚠️ ' + msg);
+            }
+        } catch (err) {
+            hideTyping();
+            appendBubble('error-msg', '⚠️ Không thể kết nối đến AI. Hãy kiểm tra kết nối mạng.');
+        } finally {
+            isWaiting = false;
+            sendBtn.disabled = false;
+            input.focus();
+        }
+    });
+})();
+</script>
+<?php endif; ?>

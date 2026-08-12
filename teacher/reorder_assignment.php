@@ -16,8 +16,9 @@ verifyCsrfToken();
 $assignmentId = filter_input(INPUT_POST, 'id', FILTER_VALIDATE_INT);
 $direction = (string) ($_POST['direction'] ?? '');
 $returnTo = (string) ($_POST['return_to'] ?? 'teacher');
+$returnPage = max(1, (int) ($_POST['return_page'] ?? 1));
 $redirect = $returnTo === 'admin' && $_SESSION['user_role'] === 'admin'
-    ? '../admin/assignments.php'
+    ? '../admin/assignments.php?page=' . $returnPage
     : 'assignments.php';
 
 if (!$assignmentId || !in_array($direction, ['up', 'down'], true)) {

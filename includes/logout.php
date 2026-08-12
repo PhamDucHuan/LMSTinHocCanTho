@@ -1,9 +1,12 @@
 <?php
 require_once __DIR__ . '/security.php';
 require_once __DIR__ . '/remember_login.php';
+require_once __DIR__ . '/login_history.php';
 secureSessionStart();
 try {
     require_once __DIR__ . '/../config/database.php';
+    markUserOffline($pdo, (int) ($_SESSION['user_id'] ?? 0));
+    recordLoginHistory($pdo, !empty($_SESSION['user_id']) ? (int) $_SESSION['user_id'] : null, 'logout', 'logout', $_SESSION['user_email'] ?? null);
     revokeRememberLogin($pdo);
 } catch (Throwable $e) {
     error_log('Could not revoke remember-login token: ' . $e->getMessage());

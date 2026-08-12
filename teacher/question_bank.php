@@ -5,12 +5,9 @@ secureSessionStart();
 requireRole(['teacher','admin']);
 require_once '../config/database.php';
 require_once '../includes/question_bank.php';
-require_once '../includes/quiz_schema.php';
 require_once '../includes/quiz_import.php';
 require_once '../includes/friendly_urls.php';
 require_once '../includes/audit.php';
-ensureQuizSchema($pdo);
-ensureQuestionBankSchema($pdo);
 
 $actorId = (int) $_SESSION['user_id'];
 $isAdmin = ($_SESSION['user_role'] ?? '') === 'admin';
@@ -162,8 +159,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if(!in_array($importDifficulty,['easy','medium','hard','from_file'],true))$importDifficulty='medium';
             $files=$_FILES['question_files']??null;
             if(!$files||!is_array($files['name']??null)||count(array_filter($files['name']))===0) throw new RuntimeException('Vui lòng chọn ít nhất một file CSV hoặc XLSX.');
-            $added=0;$duplicates=0;$fileCount=0;
-            $pdo->beginTransaction();
+            $added=0;$duplicates=0;$fileCount=0;$pendingRows=[];$seenImportFingerprints=[];
             foreach($files['name'] as $fileIndex=>$fileName){
                 if(($files['error'][$fileIndex]??UPLOAD_ERR_NO_FILE)!==UPLOAD_ERR_OK) throw new RuntimeException('Không thể tải file “'.basename((string)$fileName).'”.');
                 $extension=strtolower(pathinfo((string)$fileName,PATHINFO_EXTENSION));
@@ -183,12 +179,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if($importDifficulty!=='from_file')$difficulty=$importDifficulty;
                     if($text===''||!in_array($correct,['A','B','C','D'],true))continue;
                     $question=['question_text'=>$text,'option_a'=>$a,'option_b'=>$b,'option_c'=>$c,'option_d'=>$d]; $fingerprint=questionFingerprint($question);
-                    $check=$pdo->prepare('SELECT 1 FROM question_bank WHERE teacher_id=? AND fingerprint=?');$check->execute([$questionOwner,$fingerprint]);if($check->fetchColumn()){$duplicates++;continue;}
-                    $pdo->prepare('INSERT INTO question_bank (teacher_id,topic_id,difficulty,question_text,option_a,option_b,option_c,option_d,correct_option,fingerprint) VALUES (?,?,?,?,?,?,?,?,?,?)')->execute([$questionOwner,$selectedTopicId,$difficulty,$text,$a,$b,$c,$d,$correct,$fingerprint]);$added++;
+                    if(isset($seenImportFingerprints[$fingerprint])){$duplicates++;continue;}
+                    $seenImportFingerprints[$fingerprint]=true;
+                    $pendingRows[]=[$questionOwner,$selectedTopicId,$difficulty,$text,$a,$b,$c,$d,$correct,$fingerprint];
                 }
             }
+            if($pendingRows){
+                // Chỉ hỏi CSDL về các fingerprint có trong file, tối đa 500 mã/lệnh.
+                $existingFingerprints=[];
+                foreach(array_chunk(array_column($pendingRows,9),500) as $fingerprintBatch){
+                    $marks=implode(',',array_fill(0,count($fingerprintBatch),'?'));
+                    $check=$pdo->prepare('SELECT fingerprint FROM question_bank WHERE teacher_id=? AND fingerprint IN ('.$marks.')');
+                    $check->execute(array_merge([$questionOwner],$fingerprintBatch));
+                    foreach($check->fetchAll(PDO::FETCH_COLUMN) as $existingFingerprint)$existingFingerprints[$existingFingerprint]=true;
+                }
+                if($existingFingerprints){
+                    $beforeFilter=count($pendingRows);
+                    $pendingRows=array_values(array_filter($pendingRows,static fn(array $row):bool=>!isset($existingFingerprints[$row[9]])));
+                    $duplicates+=$beforeFilter-count($pendingRows);
+                }
+            }
+            if($pendingRows){
+                $pdo->beginTransaction();
+                // Chèn 100 câu mỗi lệnh để giảm mạnh số lượt đi-về tới MySQL.
+                foreach(array_chunk($pendingRows,100) as $batch){
+                    $placeholders=implode(',',array_fill(0,count($batch),'(?,?,?,?,?,?,?,?,?,?)'));
+                    $parameters=[];foreach($batch as $pendingRow)array_push($parameters,...$pendingRow);
+                    $insert=$pdo->prepare('INSERT INTO question_bank (teacher_id,topic_id,difficulty,question_text,option_a,option_b,option_c,option_d,correct_option,fingerprint) VALUES '.$placeholders.' ON DUPLICATE KEY UPDATE id=id');
+                    $insert->execute($parameters);
+                    $inserted=$insert->rowCount();$added+=$inserted;$duplicates+=count($batch)-$inserted;
+                }
+                $pdo->commit();
+            }
             if ($added === 0 && $duplicates === 0) throw new RuntimeException('Không tìm thấy câu hỏi hợp lệ. Hệ thống hỗ trợ mẫu 6 cột (Câu hỏi, A, B, C, D, Đáp án đúng), 7 cột có Mức độ hoặc 8 cột cũ có Chủ đề.');
-            $pdo->commit(); writeAuditLog($pdo,'question_bank.imported','question_bank',null,['topic_id'=>$selectedTopicId,'difficulty'=>$importDifficulty,'files'=>$fileCount,'added'=>$added,'duplicates'=>$duplicates]);
+            writeAuditLog($pdo,'question_bank.imported','question_bank',null,['topic_id'=>$selectedTopicId,'difficulty'=>$importDifficulty,'files'=>$fileCount,'added'=>$added,'duplicates'=>$duplicates]);
             $difficultyNotice=$importDifficulty==='from_file'?'theo mức độ trong file':questionDifficultyLabel($importDifficulty);
             $_SESSION['success']="Đã đọc {$fileCount} file và nhập {$added} câu mức {$difficultyNotice} vào chủ đề “{$selectedTopic['name']}”; bỏ qua {$duplicates} câu trùng.";
         } elseif ($action === 'generate_quiz') {

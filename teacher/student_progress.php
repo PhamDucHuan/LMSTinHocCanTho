@@ -9,6 +9,123 @@ if (empty($_SESSION['user_id']) || !in_array($_SESSION['user_role'] ?? '', ['tea
     exit;
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'set_exam_date') {
+    $cId = filter_input(INPUT_POST, 'course_id', FILTER_VALIDATE_INT);
+    $sId = filter_input(INPUT_POST, 'student_id', FILTER_VALIDATE_INT);
+    $examDate = trim((string)$_POST['exam_date']);
+    if ($examDate === '') $examDate = null;
+    
+    if ($cId && $sId) {
+        $stmt = $pdo->prepare("UPDATE course_enrollments SET exam_date = ? WHERE course_id = ? AND student_id = ?");
+        $stmt->execute([$examDate, $cId, $sId]);
+        $_SESSION['success'] = "Cập nhật ngày thi thành công!";
+        header('Location: student_progress.php' . ($courseFilter ? "?course_id=$courseFilter" : ""));
+        exit;
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'send_exam_reminder') {
+    require_once '../includes/notifications.php';
+    require_once '../includes/email_templates.php';
+    $cId = filter_input(INPUT_POST, 'course_id', FILTER_VALIDATE_INT);
+    $sId = filter_input(INPUT_POST, 'student_id', FILTER_VALIDATE_INT);
+    
+    if ($cId && $sId) {
+        // Lấy thông tin học viên và ngày thi
+        $stmt = $pdo->prepare("
+            SELECT u.name, u.email, ce.exam_date, c.title as course_title 
+            FROM course_enrollments ce 
+            JOIN users u ON u.id = ce.student_id 
+            JOIN courses c ON c.id = ce.course_id 
+            WHERE ce.course_id = ? AND ce.student_id = ?
+        ");
+        $stmt->execute([$cId, $sId]);
+        $info = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($info && $info['exam_date']) {
+            $daysLeft = ceil((strtotime((string)$info['exam_date']) - time()) / 86400);
+            $title = "🎓 Kỳ thi đang đến gần!";
+            $message = "Chỉ còn {$daysLeft} ngày nữa là đến kỳ thi môn '{$info['course_title']}'. Hãy tranh thủ ôn bài và luyện tập nhé!";
+            
+            // Gửi Notification trên web
+            createNotification($pdo, (int)$sId, 'reminder', $title, $message, '#');
+            
+            // Gửi Email
+            $baseUrl = "http://" . $_SERVER['HTTP_HOST'] . "/LMSTinHocCanTho/";
+            $examDateStr = date('d/m/Y', strtotime((string)$info['exam_date']));
+            $emailBody = get_exam_reminder_email_html($info['name'], $info['course_title'], $examDateStr, $daysLeft, $baseUrl . 'index.php');
+            sendSystemEmail($info['email'], $title, $emailBody);
+            
+            // Ghi Log (đã báo học viên)
+            $pdo->prepare("INSERT INTO reminder_logs (user_id, type, reference_id) VALUES (?, 'exam_reminder_student', ?)")
+                ->execute([$sId, $cId]);
+                
+            $_SESSION['success'] = "Đã gửi thông báo nhắc nhở cho học viên {$info['name']}.";
+        }
+        header('Location: student_progress.php' . ($courseFilter ? "?course_id=$courseFilter" : ""));
+        exit;
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'bulk_send_exam_reminder') {
+    require_once '../includes/notifications.php';
+    require_once '../includes/email_templates.php';
+    
+    // Validate selected student-course pairs
+    $reminders = $_POST['reminders'] ?? [];
+    if (!empty($reminders) && is_array($reminders)) {
+        $count = 0;
+        foreach ($reminders as $rem) {
+            list($sId, $cId) = explode('-', $rem);
+            $sId = (int)$sId;
+            $cId = (int)$cId;
+            
+            // Check authorization implicitly by checking if teacher owns course (if teacher)
+            $authCheck = "SELECT u.name, u.email, ce.exam_date, c.title as course_title 
+                          FROM course_enrollments ce 
+                          JOIN users u ON u.id = ce.student_id 
+                          JOIN courses c ON c.id = ce.course_id 
+                          WHERE ce.course_id = ? AND ce.student_id = ?";
+            $params = [$cId, $sId];
+            if ($_SESSION['user_role'] === 'teacher') {
+                $authCheck .= " AND c.teacher_id = ?";
+                $params[] = (int)$_SESSION['user_id'];
+            }
+            
+            $stmt = $pdo->prepare($authCheck);
+            $stmt->execute($params);
+            $info = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            if ($info && $info['exam_date']) {
+                $daysLeft = ceil((strtotime((string)$info['exam_date']) - time()) / 86400);
+                if ($daysLeft >= 0) {
+                    $title = "🎓 Kỳ thi đang đến gần!";
+                    $message = "Chỉ còn {$daysLeft} ngày nữa là đến kỳ thi môn '{$info['course_title']}'. Hãy tranh thủ ôn bài và luyện tập nhé!";
+                    
+                    // Web Notification
+                    createNotification($pdo, $sId, 'reminder', $title, $message, '#');
+                    
+                    // Email
+                    $baseUrl = "http://" . $_SERVER['HTTP_HOST'] . "/LMSTinHocCanTho/";
+                    $examDateStr = date('d/m/Y', strtotime((string)$info['exam_date']));
+                    $emailBody = get_exam_reminder_email_html($info['name'], $info['course_title'], $examDateStr, $daysLeft, $baseUrl . 'index.php');
+                    sendSystemEmail($info['email'], $title, $emailBody);
+                    
+                    // Log
+                    $pdo->prepare("INSERT INTO reminder_logs (user_id, type, reference_id) VALUES (?, 'exam_reminder_student', ?)")
+                        ->execute([$sId, $cId]);
+                    $count++;
+                }
+            }
+        }
+        $_SESSION['success'] = "Đã gửi thông báo nhắc nhở cho $count học viên.";
+    } else {
+        $_SESSION['error'] = "Vui lòng chọn ít nhất 1 học viên để gửi nhắc nhở.";
+    }
+    header('Location: student_progress.php' . ($courseFilter ? "?course_id=$courseFilter" : ""));
+    exit;
+}
+
 $courseFilter = filter_input(INPUT_GET, 'course_id', FILTER_VALIDATE_INT);
 $conditions = [];
 $parameters = [];
@@ -29,6 +146,30 @@ $courseStmt = $pdo->prepare($courseSql);
 $courseStmt->execute($_SESSION['user_role'] === 'teacher' ? [(int) $_SESSION['user_id']] : []);
 $availableCourses = $courseStmt->fetchAll();
 
+// Fetch upcoming exams (<= 7 days) for the modal
+$upcomingSql = "
+    SELECT ce.course_id, ce.student_id, ce.exam_date, u.name as student_name, c.title as course_title 
+    FROM course_enrollments ce 
+    JOIN users u ON u.id = ce.student_id 
+    JOIN courses c ON c.id = ce.course_id 
+    WHERE ce.exam_date IS NOT NULL 
+      AND ce.exam_date >= CURDATE() 
+      AND ce.exam_date <= DATE_ADD(CURDATE(), INTERVAL 7 DAY)
+";
+$upcomingParams = [];
+if ($_SESSION['user_role'] === 'teacher') {
+    $upcomingSql .= " AND c.teacher_id = ?";
+    $upcomingParams[] = (int) $_SESSION['user_id'];
+}
+if ($courseFilter) {
+    $upcomingSql .= " AND c.id = ?";
+    $upcomingParams[] = (int) $courseFilter;
+}
+$upcomingSql .= " ORDER BY ce.exam_date ASC";
+$stmtUp = $pdo->prepare($upcomingSql);
+$stmtUp->execute($upcomingParams);
+$upcomingExamsList = $stmtUp->fetchAll(PDO::FETCH_ASSOC);
+
 $stmt = $pdo->prepare(
     "SELECT
         c.id course_id,
@@ -36,6 +177,7 @@ $stmt = $pdo->prepare(
         u.id student_id,
         u.name student_name,
         u.email student_email,
+        ce.exam_date,
         (SELECT COUNT(*) FROM assignments a WHERE a.course_id=c.id) assignment_total,
         (SELECT COUNT(DISTINCT s.assignment_id)
          FROM submissions s
@@ -149,22 +291,32 @@ require_once '../includes/header.php';
             <h2 style="margin:0 0 7px"><i class='bx bx-line-chart'></i> Tiến độ Học viên</h2>
             <p style="margin:0;color:var(--text-muted)">Theo dõi mức độ hoàn thành và điểm trung bình của từng học viên.</p>
         </div>
-        <form method="GET" class="progress-filter">
-            <label>
-                Khóa học
-                <select name="course_id" onchange="this.form.submit()">
-                    <option value="">Tất cả khóa học</option>
-                    <?php foreach ($availableCourses as $filterCourse): ?>
-                        <option value="<?php echo (int) $filterCourse['id']; ?>" <?php echo (int) $courseFilter === (int) $filterCourse['id'] ? 'selected' : ''; ?>>
-                            <?php echo htmlspecialchars((string) $filterCourse['title'], ENT_QUOTES, 'UTF-8'); ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-            <?php if ($courseFilter): ?>
-                <a class="btn btn-outline" href="student_progress.php"><i class='bx bx-reset'></i> Xóa lọc</a>
+        <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
+            <a href="../preview_email.php?type=exam" target="_blank" class="btn btn-outline" style="height: 40px; border-color:var(--primary); color:var(--primary);">
+                <i class='bx bx-search-alt'></i> Xem trước mẫu Email
+            </a>
+            <?php if (count($upcomingExamsList) > 0): ?>
+            <button type="button" class="btn btn-primary" onclick="document.getElementById('bulkReminderModal').style.display='flex'" style="height: 40px; background:var(--success); border-color:var(--success);">
+                <i class='bx bx-mail-send'></i> Gửi nhắc nhở hàng loạt (<?php echo count($upcomingExamsList); ?>)
+            </button>
             <?php endif; ?>
-        </form>
+            <form method="GET" class="progress-filter">
+                <label>
+                    Khóa học
+                    <select name="course_id" onchange="this.form.submit()">
+                        <option value="">Tất cả khóa học</option>
+                        <?php foreach ($availableCourses as $filterCourse): ?>
+                            <option value="<?php echo (int) $filterCourse['id']; ?>" <?php echo (int) $courseFilter === (int) $filterCourse['id'] ? 'selected' : ''; ?>>
+                                <?php echo htmlspecialchars((string) $filterCourse['title'], ENT_QUOTES, 'UTF-8'); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <?php if ($courseFilter): ?>
+                    <a class="btn btn-outline" href="student_progress.php"><i class='bx bx-reset'></i> Xóa lọc</a>
+                <?php endif; ?>
+            </form>
+        </div>
     </div>
 </div>
 
@@ -179,6 +331,7 @@ require_once '../includes/header.php';
                 <thead>
                     <tr>
                         <th>Học viên</th>
+                        <th>Ngày thi</th>
                         <th>Tiến độ bài tập</th>
                         <th>Điểm TB bài tập</th>
                         <th>Tiến độ trắc nghiệm</th>
@@ -191,6 +344,26 @@ require_once '../includes/header.php';
                             <td>
                                 <strong><?php echo htmlspecialchars((string) $student['student_name'], ENT_QUOTES, 'UTF-8'); ?></strong>
                                 <small style="display:block;color:var(--text-muted)"><?php echo htmlspecialchars((string) $student['student_email'], ENT_QUOTES, 'UTF-8'); ?></small>
+                            </td>
+                            <td>
+                                <form method="post" style="display:flex; gap:6px; align-items:center; margin-bottom: 6px;">
+                                    <input type="hidden" name="action" value="set_exam_date">
+                                    <input type="hidden" name="course_id" value="<?php echo $courseId; ?>">
+                                    <input type="hidden" name="student_id" value="<?php echo $student['student_id']; ?>">
+                                    <input type="date" name="exam_date" value="<?php echo $student['exam_date'] ? date('Y-m-d', strtotime((string)$student['exam_date'])) : ''; ?>" 
+                                           style="padding:6px; border:1px solid var(--border-color); border-radius:6px; background:rgba(0,0,0,0.2); color:var(--text-main); font-size:12px;">
+                                    <button type="submit" class="btn btn-primary" title="Lưu ngày thi" style="padding:4px 8px; font-size:12px; min-height:0;"><i class='bx bx-check'></i></button>
+                                </form>
+                                <?php if ($student['exam_date'] && strtotime((string)$student['exam_date']) > time()): ?>
+                                <form method="post" style="display:flex; gap:6px; align-items:center;">
+                                    <input type="hidden" name="action" value="send_exam_reminder">
+                                    <input type="hidden" name="course_id" value="<?php echo $courseId; ?>">
+                                    <input type="hidden" name="student_id" value="<?php echo $student['student_id']; ?>">
+                                    <button type="submit" class="btn btn-outline" style="padding:4px 8px; font-size:11px; min-height:0; width: 100%; border-color: rgba(99,102,241,0.5); color: #818cf8;">
+                                        <i class='bx bx-envelope'></i> Gửi nhắc nhở
+                                    </button>
+                                </form>
+                                <?php endif; ?>
                             </td>
                             <td>
                                 <div class="progress-cell">
@@ -229,11 +402,41 @@ require_once '../includes/header.php';
 <?php endforeach; ?>
 
 <?php if (!$courses): ?>
-    <div class="box empty-state">
-        <i class='bx bx-user-x' style="font-size:48px;color:var(--text-muted)"></i>
-        <h3>Chưa có dữ liệu học viên</h3>
-        <p style="color:var(--text-muted)">Khóa học được chọn chưa có học viên đã ghi danh.</p>
+    <div class="box" style="text-align:center;padding:40px 20px;color:var(--text-muted)">
+        <i class='bx bx-folder-open' style="font-size:48px;opacity:0.5;margin-bottom:10px"></i>
+        <p>Chưa có học viên nào trong khóa học này.</p>
     </div>
 <?php endif; ?>
+
+<!-- Bulk Reminder Modal -->
+<div id="bulkReminderModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:9999; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
+    <div style="background:var(--panel-bg); border:1px solid var(--border-color); border-radius:12px; width:100%; max-width:600px; max-height:90vh; display:flex; flex-direction:column; box-shadow:0 15px 35px rgba(0,0,0,0.5);">
+        <div style="padding:20px; border-bottom:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center;">
+            <h3 style="margin:0;"><i class='bx bx-mail-send'></i> Gửi nhắc nhở hàng loạt</h3>
+            <button type="button" onclick="document.getElementById('bulkReminderModal').style.display='none'" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:24px;">&times;</button>
+        </div>
+        <form method="POST" style="display:flex; flex-direction:column; overflow:hidden;">
+            <input type="hidden" name="action" value="bulk_send_exam_reminder">
+            <div style="padding:20px; overflow-y:auto; flex:1;">
+                <p style="margin-top:0; color:var(--text-muted);">Danh sách học viên sắp thi trong 7 ngày tới (<?php echo count($upcomingExamsList); ?> học viên):</p>
+                <div style="display:flex; flex-direction:column; gap:8px;">
+                    <?php foreach ($upcomingExamsList as $up): ?>
+                        <label style="display:flex; align-items:center; gap:12px; padding:12px; background:rgba(0,0,0,0.15); border:1px solid var(--border-color); border-radius:8px; cursor:pointer;">
+                            <input type="checkbox" name="reminders[]" value="<?php echo $up['student_id'] . '-' . $up['course_id']; ?>" checked style="width:18px; height:18px; accent-color:var(--primary);">
+                            <div>
+                                <strong style="display:block;"><?php echo htmlspecialchars($up['student_name']); ?></strong>
+                                <small style="color:var(--text-muted);"><?php echo htmlspecialchars($up['course_title']); ?> - Ngày thi: <?php echo date('d/m/Y', strtotime($up['exam_date'])); ?></small>
+                            </div>
+                        </label>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+            <div style="padding:20px; border-top:1px solid var(--border-color); text-align:right;">
+                <button type="button" onclick="document.getElementById('bulkReminderModal').style.display='none'" class="btn btn-outline">Hủy</button>
+                <button type="submit" class="btn btn-primary" style="margin-left:10px;"><i class='bx bx-send'></i> Gửi tất cả</button>
+            </div>
+        </form>
+    </div>
+</div>
 
 <?php require_once '../includes/footer.php'; ?>

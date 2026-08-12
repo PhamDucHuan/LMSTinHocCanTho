@@ -2,7 +2,6 @@
 require_once '../includes/security.php';
 secureSessionStart();
 require_once '../config/database.php';
-require_once '../includes/quiz_schema.php';
 require_once '../includes/quiz_import.php';
 require_once '../includes/friendly_urls.php';
 require_once '../includes/notifications.php';
@@ -18,7 +17,6 @@ if (!isset($pdo)) {
     http_response_code(500);
     exit('Database connection error.');
 }
-ensureQuizSchema($pdo);
 
 $courseId = $_SERVER['REQUEST_METHOD'] === 'POST'
     ? (filter_input(INPUT_POST, 'course_id', FILTER_VALIDATE_INT)
@@ -328,12 +326,28 @@ if ($quizId) {
         $stmt = $pdo->prepare('SELECT s.*, COUNT(q.id) question_count FROM quiz_sections s LEFT JOIN quiz_questions q ON q.section_id=s.id WHERE s.quiz_id=? GROUP BY s.id ORDER BY s.sort_order,s.id');
         $stmt->execute([$quizId]);
         $sections = $stmt->fetchAll();
-        $questionStmt = $pdo->prepare('SELECT * FROM quiz_questions WHERE section_id=? ORDER BY sort_order,id');
-        foreach ($sections as &$section) {
-            $questionStmt->execute([$section['id']]);
-            $section['questions'] = $questionStmt->fetchAll();
+        $sectionIndexes = [];
+        foreach ($sections as $sectionIndex => &$section) {
+            $section['questions'] = [];
+            $sectionIndexes[(int) $section['id']] = $sectionIndex;
         }
         unset($section);
+        if ($sections) {
+            // Một truy vấn chung cho mọi section, tránh N+1 khi đề có nhiều phần.
+            $questionStmt = $pdo->prepare(
+                'SELECT q.* FROM quiz_questions q
+                 INNER JOIN quiz_sections s ON s.id=q.section_id
+                 WHERE s.quiz_id=?
+                 ORDER BY s.sort_order,s.id,q.sort_order,q.id'
+            );
+            $questionStmt->execute([$quizId]);
+            foreach ($questionStmt->fetchAll() as $question) {
+                $sectionId = (int) $question['section_id'];
+                if (isset($sectionIndexes[$sectionId])) {
+                    $sections[$sectionIndexes[$sectionId]]['questions'][] = $question;
+                }
+            }
+        }
         $stmt = $pdo->prepare('SELECT qa.*,u.name student_name,u.email student_email FROM quiz_attempts qa JOIN users u ON u.id=qa.student_id WHERE qa.quiz_id=? AND qa.submitted_at IS NOT NULL ORDER BY qa.submitted_at DESC');
         $stmt->execute([$quizId]);
         $attempts = $stmt->fetchAll();

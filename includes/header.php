@@ -6,14 +6,15 @@ $role = $_SESSION['user_role'] ?? '';
 $user_name = $_SESSION['user_name'] ?? 'User';
 $user_avatar = filter_var($_SESSION['user_avatar'] ?? '', FILTER_VALIDATE_URL) ?: null;
 $page_title = $page_title ?? 'LMS Dashboard';
-$unreadNotifications = 0;
-if (isset($pdo) && $pdo instanceof PDO && !empty($_SESSION['user_id'])) {
+$unreadNotifications = isset($unreadNotifications) ? max(0, (int) $unreadNotifications) : null;
+if ($unreadNotifications === null && isset($pdo) && $pdo instanceof PDO && !empty($_SESSION['user_id'])) {
     try {
         $unreadNotifications = unreadNotificationCount($pdo, (int) $_SESSION['user_id']);
     } catch (Throwable $error) {
         error_log('Cannot count notifications: ' . $error->getMessage());
     }
 }
+$unreadNotifications ??= 0;
 ?>
 <!DOCTYPE html>
 <html lang="vi">
@@ -508,8 +509,9 @@ if (isset($pdo) && $pdo instanceof PDO && !empty($_SESSION['user_id'])) {
         .sidebar-group-toggle .group-chevron { margin-left:auto; font-size:18px; transition:transform .25s ease; }
         .sidebar-group.collapsed .group-chevron { transform:rotate(-90deg); }
         .sidebar-group-items { display:grid; grid-template-rows:1fr; opacity:1; transition:grid-template-rows .28s ease,opacity .2s ease; }
-        .sidebar-group-items-inner { min-height:0; overflow:hidden; padding-bottom:7px; }
+        .sidebar-group-items-inner { min-height:0; overflow:hidden; padding-bottom:7px; transition:padding .28s ease; }
         .sidebar-group.collapsed .sidebar-group-items { grid-template-rows:0fr; opacity:0; }
+        .sidebar-group.collapsed .sidebar-group-items-inner { padding-bottom:0; }
         .sidebar-group .menu-item { padding:10px 20px 10px 29px; font-size:14px; }
         .sidebar-group .menu-item.active { padding-left:26px; }
         
@@ -848,9 +850,12 @@ if (isset($pdo) && $pdo instanceof PDO && !empty($_SESSION['user_id'])) {
                     ['id' => 'monitoring', 'label' => 'Theo dõi & AI', 'icon' => 'bx-line-chart', 'items' => [
                         ['url' => '../admin/ai_grading.php', 'icon' => 'bx-bot', 'label' => 'Giám sát chấm AI', 'match' => ['admin/ai_grading.php']],
                         ['url' => '../admin/audit_logs.php', 'icon' => 'bx-history', 'label' => 'Nhật ký hoạt động', 'match' => ['admin/audit_logs.php']],
+                        ['url' => '../admin/login_logs.php', 'icon' => 'bx-log-in-circle', 'label' => 'Nhật ký đăng nhập', 'match' => ['admin/login_logs.php']],
+                        ['url' => '../admin/tickets.php', 'icon' => 'bx-support', 'label' => 'Quản lý Hỗ trợ', 'match' => ['admin/tickets.php', 'admin/ticket_detail.php']],
                     ]],
                     ['id' => 'system', 'label' => 'Quản trị hệ thống', 'icon' => 'bx-cog', 'items' => [
                         ['url' => '../admin/users.php', 'icon' => 'bx-group', 'label' => 'Quản lý Tài khoản', 'match' => ['admin/users.php']],
+                        ['url' => '../admin/settings.php', 'icon' => 'bx-slider-alt', 'label' => 'Cấu hình hệ thống', 'match' => ['admin/settings.php']],
                         ['url' => '../admin/system_health.php', 'icon' => 'bx-pulse', 'label' => 'Tình trạng hệ thống', 'match' => ['admin/system_health.php']],
                         ['url' => '../admin/backups.php', 'icon' => 'bx-data', 'label' => 'Sao lưu dữ liệu', 'match' => ['admin/backups.php']],
                         ['url' => '../student/dashboard.php', 'icon' => 'bx-book-reader', 'label' => 'Giao diện Học viên', 'match' => ['student/dashboard.php', 'student/assignment.php', 'student/outstanding_submissions.php']],
@@ -870,12 +875,22 @@ if (isset($pdo) && $pdo instanceof PDO && !empty($_SESSION['user_id'])) {
                     ['id' => 'teacher-students', 'label' => 'Theo dõi học viên', 'icon' => 'bx-group', 'items' => [
                         ['url' => '../teacher/submissions.php', 'icon' => 'bx-file-find', 'label' => 'Bài làm Học viên', 'match' => ['teacher/submissions.php']],
                         ['url' => '../teacher/student_progress.php', 'icon' => 'bx-line-chart', 'label' => 'Tiến độ Học viên', 'match' => ['teacher/student_progress.php']],
+                        ['url' => '../teacher/export_grades.php', 'icon' => 'bx-export', 'label' => 'Xuất bảng điểm', 'match' => ['teacher/export_grades.php']],
+                        ['url' => '../admin/tickets.php', 'icon' => 'bx-support', 'label' => 'Quản lý Hỗ trợ', 'match' => ['admin/tickets.php', 'admin/ticket_detail.php']],
                     ]],
                     ['id' => 'teacher-preview', 'label' => 'Xem giao diện', 'icon' => 'bx-show', 'items' => [
                         ['url' => '../student/dashboard.php', 'icon' => 'bx-book-reader', 'label' => 'Giao diện Học viên', 'match' => ['student/dashboard.php', 'student/course.php', 'student/assignment.php', 'student/outstanding_submissions.php', 'student/assignments.php', 'student/quizzes.php', 'student/quiz.php']],
                     ]],
                 ];
             } else { // student
+                $adminEmail = '';
+                if (isset($pdo) && function_exists('getSetting')) {
+                    $adminEmail = getSetting($pdo, 'admin_email');
+                } elseif (isset($pdo) && file_exists(__DIR__ . '/settings.php')) {
+                    require_once __DIR__ . '/settings.php';
+                    $adminEmail = getSetting($pdo, 'admin_email');
+                }
+
                 $menuGroups = [
                     ['id' => 'student-overview', 'label' => 'Tổng quan', 'icon' => 'bx-home-alt', 'items' => [
                         ['url' => '../student/dashboard.php', 'icon' => 'bx-home-alt', 'label' => 'Tổng quan Học tập', 'match' => ['student/dashboard.php']],
@@ -886,6 +901,9 @@ if (isset($pdo) && $pdo instanceof PDO && !empty($_SESSION['user_id'])) {
                     ]],
                     ['id' => 'student-results', 'label' => 'Kết quả cá nhân', 'icon' => 'bx-trophy', 'items' => [
                         ['url' => '../student/achievements.php', 'icon' => 'bx-medal', 'label' => 'Thành tích của tôi', 'match' => ['student/achievements.php']],
+                    ]],
+                    ['id' => 'student-support', 'label' => 'Trợ giúp', 'icon' => 'bx-help-circle', 'items' => [
+                        ['url' => '../student/tickets.php', 'icon' => 'bx-support', 'label' => 'Trung tâm Hỗ trợ', 'match' => ['student/tickets.php', 'student/ticket_detail.php']],
                     ]],
                 ];
             }
@@ -934,7 +952,22 @@ if (isset($pdo) && $pdo instanceof PDO && !empty($_SESSION['user_id'])) {
             </div>
         </div>
     </aside>
-
+    <script>
+        // Chạy đồng bộ ngay sau khi sidebar được parse để cập nhật trạng thái từ localStorage.
+        // Điều này giúp ngăn chặn hoàn toàn hiện tượng FOUC (giật/nhảy menu khi tải trang).
+        (function() {
+            document.querySelectorAll('.sidebar-group').forEach(group => {
+                const key = 'lms_sidebar_group_' + group.getAttribute('data-sidebar-group');
+                const saved = localStorage.getItem(key);
+                if (saved !== null) {
+                    const isCollapsed = saved === 'collapsed';
+                    group.classList.toggle('collapsed', isCollapsed);
+                    const toggle = group.querySelector('.sidebar-group-toggle');
+                    if (toggle) toggle.setAttribute('aria-expanded', String(!isCollapsed));
+                }
+            });
+        })();
+    </script>
     <!-- Main Content -->
     <main class="main-content" id="main-content">
         <div class="top-navbar">
@@ -947,11 +980,9 @@ if (isset($pdo) && $pdo instanceof PDO && !empty($_SESSION['user_id'])) {
             <div style="display:flex;align-items:center;gap:10px;">
                 <a href="../account/notifications.php" class="theme-toggle" aria-label="Thông báo" style="position:relative;text-decoration:none;">
                     <i class='bx bx-bell'></i>
-                    <?php if ($unreadNotifications > 0): ?>
-                        <span style="position:absolute;right:-5px;top:-6px;min-width:18px;height:18px;padding:0 4px;border-radius:999px;background:var(--danger);color:#fff;font-size:11px;display:grid;place-items:center;">
-                            <?php echo $unreadNotifications > 99 ? '99+' : $unreadNotifications; ?>
-                        </span>
-                    <?php endif; ?>
+                    <span data-notif-badge style="position:absolute;right:-5px;top:-6px;min-width:18px;height:18px;padding:0 4px;border-radius:999px;background:var(--danger);color:#fff;font-size:11px;display:<?php echo $unreadNotifications > 0 ? 'grid' : 'none'; ?>;place-items:center;">
+                        <?php echo $unreadNotifications > 99 ? '99+' : $unreadNotifications; ?>
+                    </span>
                 </a>
                 <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Tùy chỉnh giao diện" aria-expanded="false">
                     <i class='bx bx-palette'></i>

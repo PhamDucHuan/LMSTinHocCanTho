@@ -88,6 +88,8 @@ function restoreRememberedGoogleLogin(PDO $pdo): bool
     $_SESSION['user_name'] = $user['name'];
     $_SESSION['user_role'] = $user['role'];
     $_SESSION['user_avatar'] = $user['avatar_url'] ?? null;
+    require_once __DIR__ . '/login_history.php';
+    recordLoginHistory($pdo, (int) $user['user_id'], 'login_remember_success', 'remember', null);
 
     // Xoay token sau mỗi lần khôi phục để cookie cũ không thể tái sử dụng.
     $pdo->prepare("DELETE FROM user_remember_tokens WHERE selector = ?")->execute([$token['selector']]);

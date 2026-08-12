@@ -2,13 +2,11 @@
 require_once '../includes/security.php';
 secureSessionStart();
 require_once '../config/database.php';
-require_once '../includes/quiz_schema.php';
 require_once '../includes/friendly_urls.php';
 /** @var PDO $pdo */
 if (!isset($_SESSION['user_id']) || $_SESSION['user_role'] !== 'student') {
     header('Location: ../index.php'); exit;
 }
-ensureQuizSchema($pdo);
 ensureFriendlyUrls($pdo);
 $quizSlug=trim((string)($_GET['quiz']??''));
 $quizId = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT) ?: filter_input(INPUT_POST, 'quiz_id', FILTER_VALIDATE_INT);

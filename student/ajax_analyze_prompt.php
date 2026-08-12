@@ -13,6 +13,7 @@ if (!isset($_SESSION['user_id'])) {
     exit;
 }
 verifyCsrfToken();
+session_write_close(); // Unlock session before long AI API call
 
 $data = json_decode(file_get_contents('php://input'), true);
 $assignment_id = $data['assignment_id'] ?? null;

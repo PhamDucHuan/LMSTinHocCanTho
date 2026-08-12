@@ -259,6 +259,7 @@ function parsePowerPoint(filePath) {
         timing_present: timingPresent,
         animated_object_count: new Set(animations.map(animation => animation.target_shape_id).filter(Boolean)).size,
         effect_count: animations.length,
+        has_effects: timingPresent || animations.length > 0,
       },
     };
   });

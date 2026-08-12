@@ -3,7 +3,6 @@ require_once '../includes/security.php';
 require_once '../includes/authorization.php';
 secureSessionStart();
 require_once '../config/database.php';
-require_once '../includes/quiz_schema.php';
 require_once '../includes/notifications.php';
 require_once '../includes/audit.php';
 /** @var PDO $pdo */
@@ -12,7 +11,6 @@ if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_role'], ['teacher'
     header('Location: ../index.php');
     exit;
 }
-ensureQuizSchema($pdo);
 
 $course_id = $_GET['id'] ?? 0;
 

@@ -1,13 +1,46 @@
 <?php
 declare(strict_types=1);
 
+final class AiGradingUnavailableException extends RuntimeException
+{
+}
+
 function buildStoredAiFeedback(array $aiResponse): array
 {
     $feedback = is_array($aiResponse['feedback'] ?? null) ? $aiResponse['feedback'] : [];
-    foreach (['criteria_results', 'document_diff', 'review', 'generated_rubric', 'grading_metadata', 'max_score'] as $key) {
+    foreach (['criteria_results', 'document_diff', 'reference_comparison', 'review', 'generated_rubric', 'grading_metadata', 'max_score'] as $key) {
         if (array_key_exists($key, $aiResponse)) $feedback[$key] = $aiResponse[$key];
     }
     return $feedback;
+}
+
+function assertAiGradingWorkerAvailable(): void
+{
+    if (!function_exists('curl_init')) {
+        throw new AiGradingUnavailableException('PHP cURL chưa được bật nên không thể kiểm tra worker chấm AI.');
+    }
+
+    $handle = curl_init(aiServiceUrl('/health'));
+    curl_setopt_array($handle, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER => aiServiceHeaders(),
+        CURLOPT_CONNECTTIMEOUT => 2,
+        CURLOPT_TIMEOUT => 4,
+    ]);
+    $body = curl_exec($handle);
+    $httpCode = (int) curl_getinfo($handle, CURLINFO_HTTP_CODE);
+    $curlError = curl_error($handle);
+    curl_close($handle);
+
+    $health = is_string($body) ? json_decode($body, true) : null;
+    if ($httpCode !== 200 || !is_array($health) || ($health['status'] ?? '') !== 'ok') {
+        throw new AiGradingUnavailableException(
+            'Dịch vụ chấm AI chưa sẵn sàng' . ($curlError !== '' ? ': ' . $curlError : '. Vui lòng thử lại sau.')
+        );
+    }
+    if (empty($health['persistent_queue'])) {
+        throw new AiGradingUnavailableException('Worker chấm AI đang tắt. Vui lòng báo Admin khởi động worker trước khi chấm.');
+    }
 }
 
 function enqueueGradingJob(
@@ -18,6 +51,13 @@ function enqueueGradingJob(
     string $moduleName,
     array $payload
 ): int {
+    // Không tạo một tác vụ sẽ nằm chờ vô hạn khi API hoặc worker đang tắt.
+    try {
+        assertAiGradingWorkerAvailable();
+    } catch (Throwable $error) {
+        cleanupUnusedGradingPayload($payload);
+        throw $error;
+    }
     $pdo->beginTransaction();
     try {
         $stmt = $pdo->prepare(

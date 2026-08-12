@@ -136,7 +136,7 @@ $assignments = $stmt->fetchAll();
 
 if ($is_staff) {
     $courseListStmt = $pdo->query("
-        SELECT c.id, c.title, c.slug, c.description,
+        SELECT c.id, c.title, c.slug, c.description, NULL as exam_date,
                COALESCE(ac.assignment_count,0) AS assignment_count,
                COALESCE(qc.quiz_count,0) AS quiz_count
         FROM courses c
@@ -146,7 +146,7 @@ if ($is_staff) {
     ");
 } else {
     $courseListStmt = $pdo->prepare("
-        SELECT c.id, c.title, c.slug, c.description,
+        SELECT c.id, c.title, c.slug, c.description, ce.exam_date,
                COALESCE(ac.assignment_count,0) AS assignment_count,
                COALESCE(qc.quiz_count,0) AS quiz_count
         FROM courses c
@@ -236,7 +236,7 @@ require_once '../includes/header.php';
     </div>
 </div>
 
-<script src="../assets/js/native-charts.js"></script>
+<script src="../assets/js/native-charts.js?v=<?php echo filemtime('../assets/js/native-charts.js'); ?>"></script>
 <script>
 document.addEventListener("DOMContentLoaded", function() {
     <?php if (count($radar_labels) > 0): ?>
@@ -262,6 +262,20 @@ document.addEventListener("DOMContentLoaded", function() {
             <p><?php echo htmlspecialchars($shortCourseDescription($course['description'] ?? '')); ?></p>
             <div class="dashboard-course-count"><i class='bx bx-task'></i> <?php echo (int) $course['assignment_count']; ?> bài tập / bài thi</div>
             <?php if (!$is_staff): ?><div class="dashboard-course-count"><i class='bx bx-list-check'></i> <?php echo (int) $course['quiz_count']; ?> bài trắc nghiệm</div><?php endif; ?>
+            
+            <?php 
+            if (!$is_staff && !empty($course['exam_date'])) {
+                $daysLeft = ceil((strtotime((string)$course['exam_date']) - time()) / 86400);
+                $examDateStr = date('d/m/Y', strtotime((string)$course['exam_date']));
+                if ($daysLeft > 0) {
+                    echo "<div style='background:rgba(244,63,94,0.1); border:1px solid rgba(244,63,94,0.3); border-radius:8px; padding:8px 12px; margin-bottom:15px; color:#fb7185; font-size:13px;'><strong><i class='bx bx-calendar-event'></i> Ngày thi: $examDateStr</strong><br>Còn $daysLeft ngày để ôn tập!</div>";
+                } elseif ($daysLeft == 0) {
+                    echo "<div style='background:rgba(244,63,94,0.2); border:1px solid rgba(244,63,94,0.5); border-radius:8px; padding:8px 12px; margin-bottom:15px; color:#fb7185; font-size:13px;'><strong><i class='bx bx-alarm-exclamation'></i> HÔM NAY LÀ NGÀY THI!</strong><br>Chúc bạn làm bài tốt!</div>";
+                } else {
+                    echo "<div style='background:rgba(16,185,129,0.1); border-radius:8px; padding:8px 12px; margin-bottom:15px; color:#6ee7b7; font-size:13px;'><strong><i class='bx bx-calendar-check'></i> Đã thi: $examDateStr</strong></div>";
+                }
+            } 
+            ?>
             <div style="display:flex;gap:9px;flex-wrap:wrap;margin-top:auto;">
                 <a href="<?php echo htmlspecialchars(friendlyUrl('assignments.php','course',$course['slug'])); ?>" class="btn btn-primary" style="flex:1;">Xem bài tập</a>
                 <?php if (!$is_staff): ?><a href="<?php echo htmlspecialchars(friendlyUrl('quizzes.php','course',$course['slug'])); ?>" class="btn btn-outline" style="flex:1;"><i class='bx bx-list-check'></i> Trắc nghiệm</a><?php endif; ?>

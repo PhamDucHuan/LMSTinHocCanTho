@@ -52,7 +52,9 @@
             ctx.fillRect(x, pad.top + chartHeight - barHeight, barWidth, barHeight);
             ctx.fillStyle = options.textColor || '#94a3b8';
             ctx.textAlign = 'center';
-            ctx.fillText(shorten(ctx, labels[index] ?? '', Math.max(45, slot - 5)), x + barWidth / 2, height - 24);
+            if (slot >= 35 || index % Math.ceil(45 / slot) === 0) {
+                ctx.fillText(shorten(ctx, labels[index] ?? '', Math.max(45, slot * 2)), x + barWidth / 2, height - 24);
+            }
         });
     });
 

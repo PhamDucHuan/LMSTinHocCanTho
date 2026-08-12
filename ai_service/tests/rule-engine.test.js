@@ -92,6 +92,38 @@ test('PowerPoint rules use parsed animation and transition timing evidence', () 
   assert.deepEqual(results.map(item => item.status), ['passed', 'passed']);
 });
 
+test('PowerPoint effect grading accepts effect presence without exact target or timing', () => {
+  const rubric = {
+    criteria: [
+      {
+        id: 'animation-present',
+        description: 'Tạo hiệu ứng cho tiêu đề ở Slide 1',
+        max_score: 2,
+        verification_type: 'rule',
+        verification: { type: 'ppt_animation_exists', slide: 1, selector: { text_contains: 'Tiêu đề khác' } },
+      },
+      {
+        id: 'transition-present',
+        description: 'Slide 2 tự chuyển sau 7 giây',
+        max_score: 2,
+        verification_type: 'rule',
+        verification: { type: 'ppt_transition_timing', slide: 2, expected_seconds: 7 },
+      },
+    ],
+  };
+  const document = {
+    type: 'powerpoint',
+    slides: [
+      { animations: [], animation_summary: { timing_present: true, effect_count: 0, has_effects: true }, transition: { exists: false } },
+      { animations: [], animation_summary: { timing_present: false, effect_count: 0 }, transition: { exists: true, type: 'fade', advance_after_ms: null } },
+    ],
+  };
+  const results = evaluateRuleCriteria(rubric, document);
+  assert.deepEqual(results.map(item => item.status), ['passed', 'passed']);
+  assert.deepEqual(results.map(item => item.score), [2, 2]);
+  assert.ok(results.every(item => item.evidence.policy === 'powerpoint_effect_presence'));
+});
+
 test('color differences never reduce functional grading scores', () => {
   const cases = [
     {

@@ -228,23 +228,35 @@ function evaluatePowerPoint(criterion, document) {
     case 'ppt_notes_exists': return result(criterion, Boolean(slide?.notes), { slide: verification.slide }, slide?.notes ? 'Có speaker notes.' : 'Thiếu speaker notes.');
     case 'ppt_animation_exists': {
       const animations = slide?.animations || [];
-      const targetText = String(verification.selector?.text_contains || '').toLowerCase();
-      const matching = targetText ? animations.filter(item => item.target_text.toLowerCase().includes(targetText)) : animations;
-      return result(criterion, matching.length > 0, {
+      const summary = slide?.animation_summary || {};
+      const hasEffect = animations.length > 0
+        || Number(summary.effect_count || 0) > 0
+        || summary.timing_present === true
+        || summary.has_effects === true;
+      return result(criterion, hasEffect, {
         slide: verification.slide,
-        target_text: targetText || null,
-        animations: matching,
-        animation_summary: slide?.animation_summary || null,
-      }, matching.length ? 'Đã đọc được hiệu ứng chuyển động của đối tượng.' : 'Không tìm thấy hiệu ứng chuyển động yêu cầu.');
+        policy: 'powerpoint_effect_presence',
+        animations,
+        animation_summary: summary,
+      }, hasEffect
+        ? 'Slide đã có hiệu ứng; không yêu cầu trùng tên hiệu ứng, đối tượng hoặc thời lượng.'
+        : 'Slide chưa có dữ liệu animation/timing để xác nhận hiệu ứng.');
     }
     case 'ppt_transition_exists':
       return result(criterion, Boolean(slide?.transition?.exists), { slide: verification.slide, transition: slide?.transition || null }, slide?.transition?.exists ? 'Đã đọc được hiệu ứng chuyển slide.' : 'Không có hiệu ứng chuyển slide.');
     case 'ppt_transition_timing': {
       const expectedMs = Number(verification.expected_ms ?? Number(verification.expected_seconds || 0) * 1000);
       const actualMs = slide?.transition?.advance_after_ms;
-      const tolerance = Number(verification.tolerance_ms || 250);
-      const passed = Number.isFinite(expectedMs) && actualMs != null && Math.abs(Number(actualMs) - expectedMs) <= tolerance;
-      return result(criterion, passed, { slide: verification.slide, expected_ms: expectedMs, actual_ms: actualMs, transition: slide?.transition || null }, passed ? 'Thời gian tự chuyển slide đúng.' : 'Thời gian tự chuyển slide chưa đúng.');
+      const passed = Boolean(slide?.transition?.exists);
+      return result(criterion, passed, {
+        slide: verification.slide,
+        policy: 'powerpoint_effect_presence',
+        expected_ms: expectedMs,
+        actual_ms: actualMs,
+        transition: slide?.transition || null,
+      }, passed
+        ? 'Slide đã có hiệu ứng chuyển tiếp; thời gian chỉ được ghi nhận tham khảo và không làm mất điểm.'
+        : 'Slide chưa có hiệu ứng chuyển tiếp.');
     }
     default: return result(criterion, false, { rule: verification.type }, 'Rule PowerPoint chưa được hỗ trợ đầy đủ hoặc thuộc tính parser không đọc được.', true);
   }

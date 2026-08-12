@@ -55,7 +55,6 @@
     transition: grid-template-rows 200ms ease, opacity 160ms ease;
 }
 .sidebar-group-items-inner { padding: 2px 8px 8px; }
-.sidebar-group.collapsed .sidebar-group-items-inner { padding-bottom: 0; }
 .sidebar-group .menu-item {
     position: relative;
     min-height: 40px;

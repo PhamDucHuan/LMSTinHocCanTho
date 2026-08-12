@@ -15,6 +15,35 @@ function secureSessionStart(): void
         require_once __DIR__ . '/../config/database.php';
         require_once __DIR__ . '/account_lock.php';
         terminateLockedAccountSession($GLOBALS['pdo']);
+        touchUserOnlinePresence($GLOBALS['pdo'], (int) $_SESSION['user_id']);
+    }
+}
+
+/** A one-bit online flag (0=offline, 1=online) plus a heartbeat timestamp. */
+function touchUserOnlinePresence(PDO $pdo, int $userId): void
+{
+    if ($userId <= 0) return;
+    $now = time();
+    if (($GLOBALS['_lms_presence_touched_at'] ?? 0) + 45 > $now) return;
+    $GLOBALS['_lms_presence_touched_at'] = $now;
+    try {
+        $statement = $pdo->prepare(
+            'UPDATE users SET online_status = 1, last_seen_at = NOW()
+             WHERE id = ? AND (online_status = 0 OR last_seen_at IS NULL OR last_seen_at < DATE_SUB(NOW(), INTERVAL 45 SECOND))'
+        );
+        $statement->execute([$userId]);
+    } catch (Throwable $error) {
+        error_log('Cannot update user online presence: ' . $error->getMessage());
+    }
+}
+
+function markUserOffline(PDO $pdo, int $userId): void
+{
+    if ($userId <= 0) return;
+    try {
+        $pdo->prepare('UPDATE users SET online_status = 0 WHERE id = ?')->execute([$userId]);
+    } catch (Throwable $error) {
+        error_log('Cannot mark user offline: ' . $error->getMessage());
     }
 }
 

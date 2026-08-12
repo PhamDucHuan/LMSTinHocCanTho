@@ -27,7 +27,18 @@ function removeTemporaryInputs(payload) {
   }
 }
 
+/** Stop futile retries when the AI provider explicitly has no available quota. */
+export function shouldRetryGradingError(error, attempts, maxAttempts) {
+  const message = String(error?.message || error || '');
+  const nonRetryable = /(?:hết hạn mức|quota|rate[ -]?limit|resource[ _-]?exhausted|not available to new users|api key.*(?:invalid|permission)|invalid api key)/i.test(message);
+  return !nonRetryable && Number(attempts) < Number(maxAttempts);
+}
+
 export function startPersistentGradeWorker({ grade, concurrency = 2 }) {
+  if (String(process.env.AI_PERSISTENT_QUEUE || 'true').toLowerCase() === 'false') {
+    console.warn('Persistent grading worker disabled by AI_PERSISTENT_QUEUE.');
+    return { enabled: false, stop: async () => {} };
+  }
   if (!process.env.DB_USER || !process.env.DB_NAME) {
     console.warn('Persistent grading worker disabled: DB_USER or DB_NAME is missing.');
     return { enabled: false, stop: async () => {} };
@@ -83,7 +94,7 @@ export function startPersistentGradeWorker({ grade, concurrency = 2 }) {
       removeTemporaryInputs(payload);
       if (!completedUpdate.affectedRows) return;
     } catch (error) {
-      const retry = Number(job.attempts) < maxAttempts;
+      const retry = shouldRetryGradingError(error, job.attempts, maxAttempts);
       const [failureUpdate] = await pool.execute(
         `UPDATE grading_jobs
          SET status=?, error_message=?, available_at=DATE_ADD(NOW(), INTERVAL ? SECOND),
