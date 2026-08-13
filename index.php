@@ -127,14 +127,14 @@ if (!empty($_SESSION['user_id'])) {
             <aside class="welcome-panel">
                 <div class="welcome-glow"></div>
                 <div class="welcome-content welcome-login">
-                    <img src="assets/images/logo.png" class="auth-brand-logo" alt="Tin học Cần Thơ">
+                    <img src="assets/images/Logomenu.png" class="auth-brand-logo" alt="Tin học Cần Thơ">
                     <span class="welcome-kicker">Chào mừng bạn đến với</span>
                     <h2 class="welcome-panel-title">Tin Học Cần Thơ</h2>
                     <p class="welcome-tagline"><span>Nơi</span><strong>Học Thật - Làm Thật - Chất Lượng Thật</strong></p>
                     <button type="button" class="btn btn-switch" id="show-register">Đăng ký tài khoản <i class='bx bx-right-arrow-alt'></i></button>
                 </div>
                 <div class="welcome-content welcome-register">
-                    <img src="assets/images/logo.png" class="auth-brand-logo" alt="Tin học Cần Thơ">
+                    <img src="assets/images/Logomenu.png" class="auth-brand-logo" alt="Tin học Cần Thơ">
                     <span class="welcome-kicker">Rất vui gặp lại</span>
                     <h2 class="welcome-panel-title">Đã có tài khoản?</h2>
                     <p class="welcome-description">Đăng nhập để tiếp tục khóa học, hoàn thành bài tập và xem kết quả của bạn.</p>

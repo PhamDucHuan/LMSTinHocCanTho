@@ -217,6 +217,27 @@ function evaluatePowerPoint(criterion, document) {
       const matches = Boolean(object) && String(actual).toLowerCase() === String(verification.expected).toLowerCase();
       return colorAdvisoryResult(criterion, verification.type, matches, { expected: verification.expected, actual: actual ?? null });
     }
+    case 'ppt_theme_exists': {
+      const theme = document.theme || {};
+      const expected = String(verification.expected || verification.name || '').trim();
+      const passed = theme.status === 'detected' && (!expected || String(theme.name || '').toLowerCase().includes(expected.toLowerCase()));
+      return result(criterion, passed, { theme, expected: expected || null }, passed
+        ? `Đã đọc được Theme${theme.name ? `: ${theme.name}` : ''}.`
+        : 'Chưa đọc được Theme PowerPoint yêu cầu.', !passed);
+    }
+    case 'ppt_layout_exists': {
+      const layout = slide?.layout || {};
+      return result(criterion, layout.status === 'detected', { slide: verification.slide, layout }, layout.status === 'detected'
+        ? `Đã đọc được Slide Layout${layout.name ? `: ${layout.name}` : ''}.`
+        : 'Chưa đọc được Slide Layout.', true);
+    }
+    case 'ppt_background_exists': {
+      const background = slide?.background || {};
+      const passed = background.status === 'detected';
+      return result(criterion, passed, { slide: verification.slide, background }, passed
+        ? `Đã phát hiện nền kế thừa từ ${background.source || 'PowerPoint'}.`
+        : 'Slide không có nền tùy chỉnh rõ ràng; có thể đang dùng nền mặc định của Theme.', true);
+    }
     case 'ppt_object_position':
     case 'ppt_object_size': {
       if (!object) return result(criterion, false, { selector: verification.selector }, 'Không tìm thấy đối tượng.');

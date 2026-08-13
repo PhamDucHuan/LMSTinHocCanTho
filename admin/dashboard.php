@@ -16,6 +16,7 @@ if (!isset($pdo) || $pdo === null) {
 // Số liệu tổng quan
 $stats = $pdo->query("SELECT
     (SELECT COUNT(*) FROM users WHERE role='student') AS students,
+    (SELECT COUNT(*) FROM users WHERE role='student' AND is_approved = 0) AS pending_students,
     (SELECT COUNT(*) FROM users WHERE role='teacher') AS teachers,
     (SELECT COUNT(*) FROM courses) AS courses,
     (SELECT COUNT(*) FROM assignments) AS assignments,
@@ -112,6 +113,7 @@ require_once '../includes/header.php';
 </style>
 
 <div class="stats-grid">
+    <div class="stat-card highlight" title="Tài khoản Học viên mới cần Admin phê duyệt trước khi truy cập hệ thống."><i class='bx bx-user-time stat-icon'></i><h3 class="stat-number"><?php echo number_format($stats['pending_students']); ?></h3><div class="stat-label">Học viên chờ duyệt</div></div>
     <div class="stat-card"><i class='bx bx-user stat-icon'></i><h3 class="stat-number"><?php echo number_format($stats['students']); ?></h3><div class="stat-label">Học viên</div></div>
     <div class="stat-card"><i class='bx bx-user-pin stat-icon'></i><h3 class="stat-number"><?php echo number_format($stats['teachers']); ?></h3><div class="stat-label">Giáo viên</div></div>
     <div class="stat-card"><i class='bx bx-book-open stat-icon'></i><h3 class="stat-number"><?php echo number_format($stats['courses']); ?></h3><div class="stat-label">Khóa học</div></div>

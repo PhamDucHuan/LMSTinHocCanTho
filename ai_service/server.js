@@ -29,6 +29,21 @@ const app = express();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '1mb' }));
 
+// CloudLinux/Passenger forwards the application URL prefix to Node (for
+// example /ai-service/health).  The API itself is defined from /health,
+// /grade, ... so remove that deployment-only prefix before routing.
+// Local XAMPP requests do not start with this prefix and are unchanged.
+const applicationBasePath = ('/' + String(process.env.AI_BASE_PATH || 'ai-service'))
+  .replace(/\\/g, '/')
+  .replace(/\/{2,}/g, '/')
+  .replace(/\/$/, '');
+app.use((req, res, next) => {
+  if (applicationBasePath !== '/' && (req.url === applicationBasePath || req.url.startsWith(`${applicationBasePath}/`))) {
+    req.url = req.url.slice(applicationBasePath.length) || '/';
+  }
+  next();
+});
+
 const archiveExtensions = new Set(['.zip', '.rar', '.7z']);
 const windowsContentExtensions = new Set(['.txt', '.rtf', '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp']);
 const maxArchiveFiles = 300;
@@ -1212,8 +1227,10 @@ app.use((error, req, res, next) => {
   next(error);
 });
 
+// CloudLinux/cPanel (Passenger) provides a dynamic PORT for each Node.js app.
+// Prefer it in production while preserving AI_PORT for local XAMPP usage.
 const host = process.env.AI_HOST || '127.0.0.1';
-const port = Number.parseInt(process.env.AI_PORT || '8000', 10);
+const port = Number.parseInt(process.env.PORT || process.env.AI_PORT || '8000', 10);
 app.listen(port, host, () => {
   console.log(`LMS Node AI service running at http://${host}:${port}`);
 });

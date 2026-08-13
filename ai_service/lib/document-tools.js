@@ -11,6 +11,37 @@ const tag = (value, name) => String(value || '').match(new RegExp(`<${name}(?:\\
 const tags = (value, name) => [...String(value || '').matchAll(new RegExp(`<${name}(?:\\s([^>]*))?>([\\s\\S]*?)<\\/${name}>`, 'gi'))];
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 
+function normalizeZipPath(value) {
+  const parts = [];
+  for (const part of String(value || '').replace(/\\/g, '/').split('/')) {
+    if (!part || part === '.') continue;
+    if (part === '..') parts.pop(); else parts.push(part);
+  }
+  return parts.join('/');
+}
+
+function relationshipTargets(zip, relationshipFile, ownerFile) {
+  const xml = zip.getEntry(relationshipFile)?.getData().toString('utf8') || '';
+  const ownerDirectory = String(ownerFile || '').split('/').slice(0, -1).join('/');
+  return Object.fromEntries([...xml.matchAll(/<Relationship\b([^>]*)\/?>(?:<\/Relationship>)?/gi)].map(match => {
+    const attributes = match[1];
+    const target = attr(attributes, 'Target');
+    return [attr(attributes, 'Id'), target ? normalizeZipPath(`${ownerDirectory}/${target}`) : null];
+  }).filter(([id, target]) => id && target));
+}
+
+function presentationThemeDetails(zip) {
+  const entry = zip.getEntries().find(item => /^ppt\/theme\/theme\d+\.xml$/i.test(item.entryName));
+  if (!entry) return { status: 'not_found', name: null, file: null };
+  const xml = entry.getData().toString('utf8');
+  return {
+    status: 'detected',
+    name: attr(xml.match(/<a:theme\b([^>]*)/i)?.[1], 'name') || null,
+    file: entry.entryName,
+    color_scheme: attr(xml.match(/<a:clrScheme\b([^>]*)/i)?.[1], 'name') || null,
+  };
+}
+
 function parseExcelStyles(zip) {
   const entry = zip.getEntry('xl/styles.xml');
   if (!entry) return [];
@@ -174,9 +205,22 @@ function parsePowerPoint(filePath) {
   const zip = new AdmZip(filePath);
   const presentation = zip.getEntry('ppt/presentation.xml')?.getData().toString('utf8') || '';
   const sizeAttrs = presentation.match(/<p:sldSz\b([^>]*)/i)?.[1] || '';
+  const theme = presentationThemeDetails(zip);
   const slideEntries = zip.getEntries().filter(entry => /^ppt\/slides\/slide\d+\.xml$/i.test(entry.entryName)).sort((a, b) => a.entryName.localeCompare(b.entryName, undefined, { numeric: true }));
   const slides = slideEntries.map((entry, index) => {
     const xml = entry.getData().toString('utf8');
+    const relationshipFile = `ppt/slides/_rels/${path.basename(entry.entryName)}.rels`;
+    const relationships = relationshipTargets(zip, relationshipFile, entry.entryName);
+    const layoutFile = Object.values(relationships).find(target => /^ppt\/slideLayouts\/slideLayout\d+\.xml$/i.test(target));
+    const layoutXml = layoutFile ? (zip.getEntry(layoutFile)?.getData().toString('utf8') || '') : '';
+    const layoutRelationships = layoutFile
+      ? relationshipTargets(zip, `ppt/slideLayouts/_rels/${path.basename(layoutFile)}.rels`, layoutFile)
+      : {};
+    const masterFile = Object.values(layoutRelationships).find(target => /^ppt\/slideMasters\/slideMaster\d+\.xml$/i.test(target));
+    const masterXml = masterFile ? (zip.getEntry(masterFile)?.getData().toString('utf8') || '') : '';
+    const hasOwnBackground = /<p:bg\b/i.test(xml);
+    const hasLayoutBackground = /<p:bg\b/i.test(layoutXml);
+    const hasMasterBackground = /<p:bg\b/i.test(masterXml);
     const objects = [...xml.matchAll(/<p:(sp|pic|graphicFrame)\b[^>]*>([\s\S]*?)<\/p:\1>/gi)].map(match => {
       const body = match[2];
       const offset = body.match(/<a:off\b([^>]*)/i)?.[1] || '';
@@ -250,9 +294,21 @@ function parsePowerPoint(filePath) {
     return {
       number: index + 1, objects,
       title: objects.find(object => object.type === 'text' && object.text)?.text || '',
-      background: /<p:bg\b/i.test(xml) ? { status: 'detected' } : { status: 'unsupported' },
+      background: {
+        status: hasOwnBackground || hasLayoutBackground || hasMasterBackground ? 'detected' : 'not_explicit',
+        source: hasOwnBackground ? 'slide' : (hasLayoutBackground ? 'layout' : (hasMasterBackground ? 'master' : 'theme_or_default')),
+        slide_background: hasOwnBackground,
+        layout_background: hasLayoutBackground,
+        master_background: hasMasterBackground,
+      },
       notes: notesEntry ? xmlText(notesEntry.getData().toString('utf8')) : '',
-      layout: { status: 'unsupported' },
+      layout: {
+        status: layoutFile ? 'detected' : 'not_found',
+        file: layoutFile || null,
+        name: attr(layoutXml.match(/<p:sldLayout\b([^>]*)/i)?.[1], 'matchingName') || attr(layoutXml.match(/<p:sldLayout\b([^>]*)/i)?.[1], 'type') || null,
+        master_file: masterFile || null,
+        master_name: attr(masterXml.match(/<p:sldMaster\b([^>]*)/i)?.[1], 'name') || null,
+      },
       transition,
       animations,
       animation_summary: {
@@ -266,6 +322,7 @@ function parsePowerPoint(filePath) {
   return {
     type: 'powerpoint',
     slide_size: { width: emuToInch(attr(sizeAttrs, 'cx')), height: emuToInch(attr(sizeAttrs, 'cy')) },
+    theme,
     slides,
     parser_warnings: slides.some(slide => slide.animation_summary.timing_present && !slide.animations.length)
       ? ['Có timing PowerPoint nhưng một số hiệu ứng nâng cao không ánh xạ được tới đối tượng; chỉ các mục này cần giáo viên kiểm tra.']
