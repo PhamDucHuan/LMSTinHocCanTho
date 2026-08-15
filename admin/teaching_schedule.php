@@ -10,7 +10,10 @@ if (!in_array($_SESSION['user_role'] ?? '', ['admin', 'teacher', 'administrative
     header('Location: ../index.php');
     exit;
 }
+global $pdo;
 $isAdmin = ($_SESSION['user_role'] ?? '') === 'admin';
+$showOwnSchedule = $isAdmin && ((string) ($_REQUEST['scope'] ?? '')) === 'mine';
+$canManageAllSchedules = $isAdmin && !$showOwnSchedule;
 
 function canManageTeachingClass(PDO $pdo, int $classId, int $userId, bool $isAdmin): bool
 {
@@ -89,7 +92,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && str_contains((string) ($_SERVER['CO
             $classIds = array_values(array_unique(array_filter(array_map('intval', (array) ($payload['class_ids'] ?? [])))));
             if (!$classIds) throw new RuntimeException('Danh sách lớp không hợp lệ.');
             foreach ($classIds as $classId) {
-                if (!canManageTeachingClass($pdo, $classId, (int) $_SESSION['user_id'], $isAdmin)) {
+                if (!canManageTeachingClass($pdo, $classId, (int) $_SESSION['user_id'], $canManageAllSchedules)) {
                     throw new RuntimeException('Bạn không có quyền sắp xếp một hoặc nhiều lớp.');
                 }
             }
@@ -107,7 +110,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && str_contains((string) ($_SERVER['CO
         }
         $classId = (int) ($payload['class_id'] ?? 0);
         if ($classId <= 0) throw new RuntimeException('Lớp học không hợp lệ.');
-        if (!canManageTeachingClass($pdo, $classId, (int) $_SESSION['user_id'], $isAdmin)) throw new RuntimeException('Bạn không có quyền sửa lịch của lớp này.');
+        if (!canManageTeachingClass($pdo, $classId, (int) $_SESSION['user_id'], $canManageAllSchedules)) throw new RuntimeException('Bạn không có quyền sửa lịch của lớp này.');
 
         if ($action === 'get_class') {
             $stmt = $pdo->prepare('SELECT tc.id, tc.class_name, tc.notes, tc.total_sessions, tc.planned_weekdays, tc.planned_start_date, tc.planned_start_time, tc.planned_end_time, tc.course_id, tc.teacher_id, tc.status, GROUP_CONCAT(tcs.student_name ORDER BY tcs.student_name SEPARATOR "\\n") AS students FROM teaching_classes tc LEFT JOIN teaching_class_students tcs ON tcs.teaching_class_id=tc.id WHERE tc.id=? GROUP BY tc.id');
@@ -129,14 +132,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && str_contains((string) ($_SERVER['CO
                 $classConfig = $pdo->prepare('SELECT planned_weekdays FROM teaching_classes WHERE id=?');
                 $classConfig->execute([$classId]);
                 $isMakeup = in_array((int) (new DateTimeImmutable($date))->format('N'), plannedWeekdays((string) $classConfig->fetchColumn()), true) ? 0 : 1;
-                $stmt = $pdo->prepare('UPDATE teaching_schedule_slots SET teaching_date=?, start_time=?, end_time=?, is_makeup=? WHERE id=? AND teaching_class_id=?');
-                $stmt->execute([$date, $start, $end, $isMakeup, $slotId, $classId]);
+                $substituteTeacherId = (int) ($payload['substitute_teacher_id'] ?? 0) ?: null;
+                $stmt = $pdo->prepare('UPDATE teaching_schedule_slots SET teaching_date=?, start_time=?, end_time=?, is_makeup=?, substitute_teacher_id=? WHERE id=? AND teaching_class_id=?');
+                $stmt->execute([$date, $start, $end, $isMakeup, $substituteTeacherId, $slotId, $classId]);
             } else {
                 $classConfig = $pdo->prepare('SELECT planned_weekdays FROM teaching_classes WHERE id=?');
                 $classConfig->execute([$classId]);
                 $isMakeup = in_array((int) (new DateTimeImmutable($date))->format('N'), plannedWeekdays((string) $classConfig->fetchColumn()), true) ? 0 : 1;
-                $stmt = $pdo->prepare('INSERT INTO teaching_schedule_slots (teaching_class_id, teaching_date, start_time, end_time, is_makeup, created_by) VALUES (?, ?, ?, ?, ?, ?)');
-                $stmt->execute([$classId, $date, $start, $end, $isMakeup, (int) $_SESSION['user_id']]);
+                $substituteTeacherId = (int) ($payload['substitute_teacher_id'] ?? 0) ?: null;
+                $stmt = $pdo->prepare('INSERT INTO teaching_schedule_slots (teaching_class_id, teaching_date, start_time, end_time, is_makeup, substitute_teacher_id, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)');
+                $stmt->execute([$classId, $date, $start, $end, $isMakeup, $substituteTeacherId, (int) $_SESSION['user_id']]);
                 $slotId = (int) $pdo->lastInsertId();
                 rebalancePlannedSchedule($pdo, $classId, (int) $_SESSION['user_id'], $isMakeup === 1);
             }
@@ -169,7 +174,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $plannedStartTime = (string) ($_POST['planned_start_time'] ?? '');
         $plannedEndTime = (string) ($_POST['planned_end_time'] ?? '');
         $courseId = (int) ($_POST['course_id'] ?? 0);
-        $teacherId = $isAdmin ? ((int) ($_POST['teacher_id'] ?? 0) ?: null) : (int) $_SESSION['user_id'];
+        $teacherId = $canManageAllSchedules ? ((int) ($_POST['teacher_id'] ?? 0) ?: null) : (int) $_SESSION['user_id'];
         $names = array_values(array_unique(array_filter(array_map(static fn($value) => trim($value), preg_split('/\R/', (string) ($_POST['student_names'] ?? '')) ?: []))));
         if ($courseId > 0) {
             $courseStmt = $pdo->prepare('SELECT title FROM courses WHERE id=? LIMIT 1');
@@ -177,7 +182,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $courseTitle = $courseStmt->fetchColumn();
             if ($courseTitle === false) {
                 $_SESSION['error'] = 'Khóa học được chọn không còn tồn tại.';
-                header('Location: teaching_schedule.php?month=' . rawurlencode((string) ($_POST['month'] ?? date('Y-m'))));
+                header('Location: teaching_schedule.php?month=' . rawurlencode((string) ($_POST['month'] ?? date('Y-m'))) . ($showOwnSchedule ? '&scope=mine' : ''));
                 exit;
             }
             $className = (string) $courseTitle;
@@ -208,7 +213,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } elseif ($action === 'delete_class') {
         $classId = (int) ($_POST['class_id'] ?? 0);
-        if ($classId <= 0 || !canManageTeachingClass($pdo, $classId, (int) $_SESSION['user_id'], $isAdmin)) {
+        if ($classId <= 0 || !canManageTeachingClass($pdo, $classId, (int) $_SESSION['user_id'], $canManageAllSchedules)) {
             $_SESSION['error'] = 'Bạn không có quyền xóa lớp này.';
         } else {
             $classStmt = $pdo->prepare('SELECT class_name FROM teaching_classes WHERE id=?');
@@ -220,7 +225,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } elseif ($action === 'complete_class') {
         $classId = (int) ($_POST['class_id'] ?? 0);
-        if ($classId <= 0 || !canManageTeachingClass($pdo, $classId, (int) $_SESSION['user_id'], $isAdmin)) {
+        if ($classId <= 0 || !canManageTeachingClass($pdo, $classId, (int) $_SESSION['user_id'], $canManageAllSchedules)) {
             $_SESSION['error'] = 'Bạn không có quyền kết thúc lớp này.';
         } else {
             $pdo->prepare("UPDATE teaching_classes SET status='completed' WHERE id=?")->execute([$classId]);
@@ -229,7 +234,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } elseif ($action === 'pause_class' || $action === 'resume_class') {
         $classId = (int) ($_POST['class_id'] ?? 0);
-        if ($classId <= 0 || !canManageTeachingClass($pdo, $classId, (int) $_SESSION['user_id'], $isAdmin)) {
+        if ($classId <= 0 || !canManageTeachingClass($pdo, $classId, (int) $_SESSION['user_id'], $canManageAllSchedules)) {
             $_SESSION['error'] = 'Bạn không có quyền thay đổi trạng thái lớp này.';
         } else {
             $newStatus = $action === 'pause_class' ? 'paused' : 'active';
@@ -240,7 +245,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($action === 'move_class') {
         $classId = (int) ($_POST['class_id'] ?? 0);
         $direction = (string) ($_POST['direction'] ?? '');
-        if (!in_array($direction, ['up', 'down'], true) || $classId <= 0 || !canManageTeachingClass($pdo, $classId, (int) $_SESSION['user_id'], $isAdmin)) {
+        if (!in_array($direction, ['up', 'down'], true) || $classId <= 0 || !canManageTeachingClass($pdo, $classId, (int) $_SESSION['user_id'], $canManageAllSchedules)) {
             $_SESSION['error'] = 'Không thể thay đổi thứ tự lớp.';
         } else {
             $currentStmt = $pdo->prepare('SELECT id, sort_order, status FROM teaching_classes WHERE id=?');
@@ -249,7 +254,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($current) {
                 $operator = $direction === 'up' ? '<' : '>';
                 $orderBy = $direction === 'up' ? 'DESC' : 'ASC';
-                $scope = $isAdmin ? '' : ' AND teacher_id=' . (int) $_SESSION['user_id'];
+                $scope = $canManageAllSchedules ? '' : ' AND teacher_id=' . (int) $_SESSION['user_id'];
                 $neighborStmt = $pdo->prepare("SELECT id, sort_order FROM teaching_classes WHERE status=? AND (sort_order {$operator} ? OR (sort_order=? AND id " . ($direction === 'up' ? '<' : '>') . " ?)) {$scope} ORDER BY sort_order {$orderBy}, id {$orderBy} LIMIT 1");
                 $neighborStmt->execute([$current['status'], (int) $current['sort_order'], (int) $current['sort_order'], $classId]);
                 $neighbor = $neighborStmt->fetch(PDO::FETCH_ASSOC);
@@ -272,9 +277,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $className = trim((string) ($_POST['class_name'] ?? ''));
         $notes = trim((string) ($_POST['notes'] ?? ''));
         $courseId = (int) ($_POST['course_id'] ?? 0);
-        $teacherId = $isAdmin ? ((int) ($_POST['teacher_id'] ?? 0) ?: null) : (int) $_SESSION['user_id'];
+        $teacherId = $canManageAllSchedules ? ((int) ($_POST['teacher_id'] ?? 0) ?: null) : (int) $_SESSION['user_id'];
         $names = array_values(array_unique(array_filter(array_map(static fn($value) => trim($value), preg_split('/\R/', (string) ($_POST['student_names'] ?? '')) ?: []))));
-        if ($classId <= 0 || !canManageTeachingClass($pdo, $classId, (int) $_SESSION['user_id'], $isAdmin)) {
+        if ($classId <= 0 || !canManageTeachingClass($pdo, $classId, (int) $_SESSION['user_id'], $canManageAllSchedules)) {
             $_SESSION['error'] = 'Bạn không có quyền sửa lớp này.';
         } else {
             if ($courseId > 0) {
@@ -283,7 +288,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $courseTitle = $courseStmt->fetchColumn();
                 if ($courseTitle === false) {
                     $_SESSION['error'] = 'Khóa học được chọn không còn tồn tại.';
-                    header('Location: teaching_schedule.php?month=' . rawurlencode((string) ($_POST['month'] ?? date('Y-m'))));
+                    header('Location: teaching_schedule.php?month=' . rawurlencode((string) ($_POST['month'] ?? date('Y-m'))) . ($showOwnSchedule ? '&scope=mine' : ''));
                     exit;
                 }
                 $className = (string) $courseTitle;
@@ -309,19 +314,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
     }
-    header('Location: teaching_schedule.php?month=' . rawurlencode((string) ($_POST['month'] ?? date('Y-m'))));
+    header('Location: teaching_schedule.php?month=' . rawurlencode((string) ($_POST['month'] ?? date('Y-m'))) . ($showOwnSchedule ? '&scope=mine' : ''));
     exit;
 }
 
-$month = (string) ($_GET['month'] ?? date('Y-m'));
-if (!preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $month)) $month = date('Y-m');
-$firstDay = new DateTimeImmutable($month . '-01');
-$lastDay = $firstDay->modify('last day of this month');
+$selectedDate = (string) ($_GET['date'] ?? date('Y-m-d'));
+if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $selectedDate)) $selectedDate = date('Y-m-d');
+try {
+    $selectedDay = new DateTimeImmutable($selectedDate);
+} catch (Throwable) {
+    $selectedDay = new DateTimeImmutable('today');
+    $selectedDate = $selectedDay->format('Y-m-d');
+}
+$firstDay = $selectedDay->modify('-' . ((int) $selectedDay->format('N') - 1) . ' days');
+$lastDay = $firstDay->modify('+6 days');
+$month = $selectedDay->format('Y-m');
+$previousWeek = $firstDay->modify('-7 days')->format('Y-m-d');
+$nextWeek = $firstDay->modify('+7 days')->format('Y-m-d');
+$todayDate = date('Y-m-d');
 $days = [];
 for ($day = $firstDay; $day <= $lastDay; $day = $day->modify('+1 day')) $days[] = $day;
 $showCompleted = ((string) ($_GET['show_completed'] ?? '')) === '1';
 
-$teachers = $isAdmin ? $pdo->query("SELECT id, name FROM users WHERE role IN ('teacher','administrative_staff','admin') AND is_approved=1 ORDER BY name")->fetchAll() : [];
+$substituteTeachers = $pdo->query("SELECT id, name FROM users WHERE role IN ('teacher','administrative_staff','admin') AND is_approved=1 AND COALESCE(is_locked,0)=0 ORDER BY name")->fetchAll();
+$teachers = $canManageAllSchedules ? $substituteTeachers : [];
 $courses = $pdo->query('SELECT id, title FROM courses ORDER BY title, id')->fetchAll();
 $classSql =
     "SELECT tc.id, tc.class_name, tc.notes, tc.course_id, tc.status, tc.sort_order, c.title AS course_title, tc.teacher_id, u.name AS teacher_name,
@@ -331,36 +347,36 @@ $classSql =
      LEFT JOIN users u ON u.id=tc.teacher_id
      LEFT JOIN courses c ON c.id=tc.course_id
      LEFT JOIN teaching_class_students tcs ON tcs.teaching_class_id=tc.id";
-if (!$isAdmin) $classSql .= ' WHERE tc.teacher_id = ' . (int) $_SESSION['user_id'];
+if (!$canManageAllSchedules) $classSql .= ' WHERE (tc.teacher_id = ' . (int) $_SESSION['user_id'] . ' OR EXISTS (SELECT 1 FROM teaching_schedule_slots own_ts WHERE own_ts.teaching_class_id=tc.id AND own_ts.substitute_teacher_id=' . (int) $_SESSION['user_id'] . '))';
 else $classSql .= ' WHERE 1=1';
 if (!$showCompleted) $classSql .= " AND tc.status='active'";
 $classSql .= ' GROUP BY tc.id';
 $classSql .= ' ORDER BY tc.sort_order ASC, tc.id ASC';
 $classes = $pdo->query($classSql)->fetchAll();
 $pausedSql = "SELECT tc.id, tc.class_name, c.title AS course_title, u.name AS teacher_name FROM teaching_classes tc LEFT JOIN courses c ON c.id=tc.course_id LEFT JOIN users u ON u.id=tc.teacher_id WHERE tc.status='paused'";
-if (!$isAdmin) $pausedSql .= ' AND tc.teacher_id=' . (int) $_SESSION['user_id'];
+if (!$canManageAllSchedules) $pausedSql .= ' AND tc.teacher_id=' . (int) $_SESSION['user_id'];
 $pausedSql .= ' ORDER BY tc.updated_at DESC, tc.id DESC';
 $pausedClasses = $pdo->query($pausedSql)->fetchAll();
-$slotStmt = $pdo->prepare('SELECT id, teaching_class_id, teaching_date, start_time, end_time FROM teaching_schedule_slots WHERE teaching_date BETWEEN ? AND ? ORDER BY start_time, id');
+$slotStmt = $pdo->prepare('SELECT id, teaching_class_id, teaching_date, start_time, end_time, substitute_teacher_id FROM teaching_schedule_slots WHERE teaching_date BETWEEN ? AND ? ORDER BY start_time, id');
 $slotStmt->execute([$firstDay->format('Y-m-d'), $lastDay->format('Y-m-d')]);
 $slots = [];
 foreach ($slotStmt as $slot) $slots[(int) $slot['teaching_class_id']][$slot['teaching_date']][] = $slot;
 
-$page_title = 'Xếp lớp & Lịch dạy';
+$page_title = $showOwnSchedule ? 'Lịch dạy của tôi' : 'Xếp lớp & Lịch dạy';
 require_once '../includes/header.php';
 ?>
 <style>
 .schedule-layout{display:grid;grid-template-columns:minmax(290px,360px) minmax(0,1fr);gap:22px;align-items:start}.schedule-card{padding:24px;background:var(--glass-bg);border:1px solid var(--border-color);border-radius:18px}.schedule-card h2{margin:0 0 18px;font-size:22px}.schedule-form{display:grid;gap:14px}.schedule-form label{display:grid;gap:7px;font-weight:700}.schedule-form textarea{min-height:150px;resize:vertical}.schedule-note{color:var(--text-muted);font-size:13px;line-height:1.55;margin:0}.calendar-wrap{overflow:auto;border:1px solid var(--border-color);border-radius:16px;background:var(--glass-bg);max-height:calc(100vh - 215px)}.schedule-table{border-collapse:separate;border-spacing:0;width:max-content;min-width:100%;font-size:13px}.schedule-table th{position:sticky;top:0;z-index:4;background:#1f517e;color:#fff;text-align:center;padding:12px 8px;border-right:1px solid rgba(255,255,255,.18);border-bottom:1px solid rgba(255,255,255,.2)}.schedule-table th.weekend{background:#3d3d3d}.schedule-table th.info-head{left:0;z-index:6}.schedule-table td{border-right:1px solid var(--border-color);border-bottom:1px solid var(--border-color);padding:6px;min-width:118px;height:68px;background:rgba(255,255,255,.012)}.schedule-table td.info-cell{position:sticky;left:0;z-index:3;min-width:260px;max-width:260px;background:var(--sidebar-bg);padding:10px 12px}.class-head{display:flex;align-items:start;gap:8px;justify-content:space-between}.class-title{font-weight:800;font-size:14px}.class-actions{display:flex;gap:4px}.class-actions form{margin:0}.class-edit,.class-complete,.class-delete{padding:4px 7px;border-radius:7px;background:transparent;cursor:pointer;line-height:1}.class-edit{border:1px solid #57b7ff;color:#85ccff}.class-complete{border:1px solid #17bd86;color:#42d6a5}.class-delete{border:1px solid #ef476f;color:#ff7895}.class-edit:hover{background:rgba(87,183,255,.16)}.class-complete:hover{background:rgba(23,189,134,.16)}.class-delete:hover{background:rgba(239,71,111,.16)}.completed-badge{display:block;width:max-content;margin-top:3px;color:#ffd166;font-size:10px}.class-meta{margin-top:4px;color:var(--text-muted);font-size:12px;line-height:1.45}.schedule-table td.weekend{background:rgba(0,0,0,.2)}.schedule-cell{cursor:pointer;transition:.18s}.schedule-cell:hover{background:rgba(var(--primary-rgb),.12)!important;box-shadow:inset 0 0 0 1px var(--primary)}.slot{display:block;width:100%;padding:6px 8px;border:0;border-radius:7px;background:#b6e5d0;color:#12352a;font:700 12px inherit;cursor:pointer;margin:2px 0}.slot:hover{filter:brightness(1.05)}.empty-cell{color:var(--text-muted);font-size:19px;opacity:0}.schedule-cell:hover .empty-cell{opacity:.65}.month-bar{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:18px}.month-control{display:flex;align-items:center;gap:9px}.month-control input{width:150px}.schedule-dialog{width:min(440px,calc(100vw - 28px));padding:0;border:1px solid var(--border-color);border-radius:17px;color:var(--text-main);background:var(--sidebar-bg);box-shadow:0 24px 70px rgba(0,0,0,.5)}.schedule-dialog::backdrop{background:rgba(2,6,23,.7)}.schedule-dialog form{display:grid;gap:15px;padding:22px}.dialog-title{margin:0;font-size:21px}.time-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.time-grid label{display:grid;gap:7px;font-weight:700}.dialog-actions{display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap}.delete-slot{margin-right:auto}@media(max-width:900px){.schedule-layout{grid-template-columns:1fr}.calendar-wrap{max-height:none}}@media(max-width:600px){.schedule-card{padding:17px}.schedule-table td{min-width:104px}.schedule-table td.info-cell{min-width:210px;max-width:210px}.time-grid{grid-template-columns:1fr}}
 </style>
-<h1><i class='bx bx-calendar-event'></i> Xếp lớp & lịch dạy</h1>
-<p style="color:var(--text-muted);margin:-8px 0 22px">Tạo lớp, nhập tên học viên và nhấn trực tiếp vào ô lịch để thêm, sửa hoặc xóa buổi dạy.</p>
+<h1><i class='bx bx-calendar-event'></i> <?php echo $showOwnSchedule ? 'Lịch dạy của tôi' : 'Xếp lớp & lịch dạy'; ?></h1>
+<p style="color:var(--text-muted);margin:-8px 0 22px"><?php echo $showOwnSchedule ? 'Quản lý các lớp do bạn phụ trách; nhấn trực tiếp vào ô lịch để thêm, sửa hoặc xóa buổi dạy.' : 'Tạo lớp, nhập tên học viên và nhấn trực tiếp vào ô lịch để thêm, sửa hoặc xóa buổi dạy.'; ?></p>
 <?php if (!empty($_SESSION['success'])): ?><div class="alert alert-success"><?php echo htmlspecialchars($_SESSION['success']); unset($_SESSION['success']); ?></div><?php endif; ?>
 <?php if (!empty($_SESSION['error'])): ?><div class="alert alert-error"><?php echo htmlspecialchars($_SESSION['error']); unset($_SESSION['error']); ?></div><?php endif; ?>
 <div class="schedule-layout">
-  <section class="schedule-card"><h2><i class='bx bx-plus-circle'></i> Tạo lớp mới</h2><form class="schedule-form" method="post"><?php echo csrfField(); ?><input type="hidden" name="action" value="create_class"><input type="hidden" name="month" value="<?php echo htmlspecialchars($month); ?>"><label>Khóa học trong hệ thống<select name="course_id" id="course-id"><option value="">— Lớp riêng (nhập tên bên dưới) —</option><?php foreach ($courses as $course): ?><option value="<?php echo (int) $course['id']; ?>" data-title="<?php echo htmlspecialchars($course['title'], ENT_QUOTES); ?>"><?php echo htmlspecialchars($course['title']); ?></option><?php endforeach; ?></select></label><label>Tên lớp<input required name="class_name" id="class-name" maxlength="191" placeholder="Chọn khóa học hoặc nhập lớp riêng"></label><p class="schedule-note">Khi chọn khóa học, tên lớp sẽ tự đồng bộ theo tên khóa học. Bạn vẫn có thể tạo lớp riêng nếu cần.</p><?php if ($isAdmin): ?><label>Giáo viên phụ trách<select name="teacher_id"><option value="">Chưa phân công</option><?php foreach ($teachers as $teacher): ?><option value="<?php echo (int) $teacher['id']; ?>"><?php echo htmlspecialchars($teacher['name']); ?></option><?php endforeach; ?></select></label><?php else: ?><p class="schedule-note"><i class='bx bx-user-check'></i> Lớp này sẽ được phân công cho bạn.</p><?php endif; ?><label>Học viên trong lớp<textarea name="student_names" placeholder="Mỗi dòng một học viên&#10;Nguyễn Văn A&#10;Trần Thị B"></textarea></label><p class="schedule-note">Có thể nhập tên tự do. Mỗi dòng sẽ được xếp thành một học viên của lớp.</p><button class="btn btn-primary"><i class='bx bx-save'></i> Tạo lớp & xếp học viên</button></form></section>
+<section class="schedule-card"><h2><i class='bx bx-plus-circle'></i> Tạo lớp mới</h2><form class="schedule-form" method="post"><?php echo csrfField(); ?><input type="hidden" name="action" value="create_class"><input type="hidden" name="month" value="<?php echo htmlspecialchars($month); ?>"><input type="hidden" name="scope" value="<?php echo $showOwnSchedule ? 'mine' : 'all'; ?>"><label>Khóa học trong hệ thống<select name="course_id" id="course-id"><option value="">— Lớp riêng (nhập tên bên dưới) —</option><?php foreach ($courses as $course): ?><option value="<?php echo (int) $course['id']; ?>" data-title="<?php echo htmlspecialchars($course['title'], ENT_QUOTES); ?>"><?php echo htmlspecialchars($course['title']); ?></option><?php endforeach; ?></select></label><label>Tên lớp<input required name="class_name" id="class-name" maxlength="191" placeholder="Chọn khóa học hoặc nhập lớp riêng"></label><p class="schedule-note">Khi chọn khóa học, tên lớp sẽ tự đồng bộ theo tên khóa học. Bạn vẫn có thể tạo lớp riêng nếu cần.</p><?php if ($canManageAllSchedules): ?><label>Giáo viên phụ trách<select name="teacher_id"><option value="">Chưa phân công</option><?php foreach ($teachers as $teacher): ?><option value="<?php echo (int) $teacher['id']; ?>"><?php echo htmlspecialchars($teacher['name']); ?></option><?php endforeach; ?></select></label><?php else: ?><p class="schedule-note"><i class='bx bx-user-check'></i> Lớp này sẽ được phân công cho bạn.</p><?php endif; ?><label>Học viên trong lớp<textarea name="student_names" placeholder="Mỗi dòng một học viên&#10;Nguyễn Văn A&#10;Trần Thị B"></textarea></label><p class="schedule-note">Có thể nhập tên tự do. Mỗi dòng sẽ được xếp thành một học viên của lớp.</p><button class="btn btn-primary"><i class='bx bx-save'></i> Tạo lớp & xếp học viên</button></form></section>
   <section class="schedule-card"><div class="month-bar"><div><h2 style="margin:0"><i class='bx bx-table'></i> Lịch dạy tháng <?php echo $firstDay->format('m/Y'); ?></h2><p class="schedule-note" style="margin-top:6px">Nhấn ô trống để thêm buổi; nhấn giờ học để chỉnh sửa hoặc xóa.</p></div><form class="month-control" method="get"><input type="month" name="month" value="<?php echo htmlspecialchars($month); ?>"><button class="btn btn-outline">Xem lịch</button></form></div><div class="calendar-wrap"><table class="schedule-table"><thead><tr><th class="info-head">LỚP / HỌC VIÊN</th><?php foreach ($days as $day): $weekend=(int)$day->format('N')>=6; ?><th class="<?php echo $weekend ? 'weekend' : ''; ?>"><small><?php echo ['T2','T3','T4','T5','T6','T7','CN'][(int)$day->format('N')-1]; ?></small><br><?php echo $day->format('d'); ?></th><?php endforeach; ?></tr></thead><tbody><?php foreach ($classes as $class): $displayName = (string) ($class['course_title'] ?: $class['class_name']); ?><tr><td class="info-cell"><div class="class-head"><div class="class-title"><?php echo htmlspecialchars($displayName); ?></div><form method="post" onsubmit="return confirm('Xóa lớp này và toàn bộ lịch dạy của lớp?');"><?php echo csrfField(); ?><input type="hidden" name="action" value="delete_class"><input type="hidden" name="class_id" value="<?php echo (int) $class['id']; ?>"><input type="hidden" name="month" value="<?php echo htmlspecialchars($month); ?>"><button type="submit" class="class-delete" title="Xóa lớp"><i class='bx bx-trash'></i></button></form></div><div class="class-meta"><?php echo htmlspecialchars($class['teacher_name'] ?: 'Chưa phân công giáo viên'); ?> · <?php echo (int)$class['student_count']; ?> học viên</div><div class="class-meta"><?php echo htmlspecialchars($class['students'] ?: 'Chưa nhập học viên'); ?></div></td><?php foreach ($days as $day): $date=$day->format('Y-m-d'); $cellSlots=$slots[(int)$class['id']][$date]??[]; $weekend=(int)$day->format('N')>=6; ?><td class="schedule-cell <?php echo $weekend ? 'weekend' : ''; ?>" data-class-id="<?php echo (int)$class['id']; ?>" data-class-name="<?php echo htmlspecialchars($displayName, ENT_QUOTES); ?>" data-date="<?php echo $date; ?>"><?php foreach ($cellSlots as $slot): ?><button type="button" class="slot" data-slot-id="<?php echo (int)$slot['id']; ?>" data-start="<?php echo substr($slot['start_time'],0,5); ?>" data-end="<?php echo substr($slot['end_time'],0,5); ?>"><?php echo substr($slot['start_time'],0,5); ?> – <?php echo substr($slot['end_time'],0,5); ?></button><?php endforeach; ?><span class="empty-cell">+</span></td><?php endforeach; ?></tr><?php endforeach; ?><?php if (!$classes): ?><tr><td colspan="<?php echo count($days)+1; ?>" style="padding:34px;text-align:center;color:var(--text-muted)">Chưa có lớp nào. Hãy tạo lớp đầu tiên ở cột bên trái.</td></tr><?php endif; ?></tbody></table></div></section>
 </div>
-<dialog class="schedule-dialog" id="class-dialog"><form method="post" id="class-form"><?php echo csrfField(); ?><input type="hidden" name="action" value="update_class"><input type="hidden" name="class_id" id="edit-class-id"><input type="hidden" name="month" value="<?php echo htmlspecialchars($month); ?>"><h2 class="dialog-title">Sửa lớp</h2><label>Khóa học trong hệ thống<select name="course_id" id="edit-course-id"><option value="">— Lớp riêng —</option><?php foreach ($courses as $course): ?><option value="<?php echo (int) $course['id']; ?>" data-title="<?php echo htmlspecialchars($course['title'], ENT_QUOTES); ?>"><?php echo htmlspecialchars($course['title']); ?></option><?php endforeach; ?></select></label><label>Tên lớp<input name="class_name" id="edit-class-name" required maxlength="191"></label><?php if ($isAdmin): ?><label>Giáo viên phụ trách<select name="teacher_id" id="edit-teacher-id"><option value="">Chưa phân công</option><?php foreach ($teachers as $teacher): ?><option value="<?php echo (int) $teacher['id']; ?>"><?php echo htmlspecialchars($teacher['name']); ?></option><?php endforeach; ?></select></label><?php endif; ?><label>Học viên trong lớp<textarea name="student_names" id="edit-student-names"></textarea></label><div class="dialog-actions"><button class="btn btn-outline" type="button" id="close-class-dialog">Hủy</button><button class="btn btn-primary" type="submit"><i class='bx bx-save'></i> Lưu lớp</button></div></form></dialog>
+<dialog class="schedule-dialog" id="class-dialog"><form method="post" id="class-form"><?php echo csrfField(); ?><input type="hidden" name="action" value="update_class"><input type="hidden" name="class_id" id="edit-class-id"><input type="hidden" name="month" value="<?php echo htmlspecialchars($month); ?>"><input type="hidden" name="scope" value="<?php echo $showOwnSchedule ? 'mine' : 'all'; ?>"><h2 class="dialog-title">Sửa lớp</h2><label>Khóa học trong hệ thống<select name="course_id" id="edit-course-id"><option value="">— Lớp riêng —</option><?php foreach ($courses as $course): ?><option value="<?php echo (int) $course['id']; ?>" data-title="<?php echo htmlspecialchars($course['title'], ENT_QUOTES); ?>"><?php echo htmlspecialchars($course['title']); ?></option><?php endforeach; ?></select></label><label>Tên lớp<input name="class_name" id="edit-class-name" required maxlength="191"></label><?php if ($canManageAllSchedules): ?><label>Giáo viên phụ trách<select name="teacher_id" id="edit-teacher-id"><option value="">Chưa phân công</option><?php foreach ($teachers as $teacher): ?><option value="<?php echo (int) $teacher['id']; ?>"><?php echo htmlspecialchars($teacher['name']); ?></option><?php endforeach; ?></select></label><?php endif; ?><label>Học viên trong lớp<textarea name="student_names" id="edit-student-names"></textarea></label><div class="dialog-actions"><button class="btn btn-outline" type="button" id="close-class-dialog">Hủy</button><button class="btn btn-primary" type="submit"><i class='bx bx-save'></i> Lưu lớp</button></div></form></dialog>
 <dialog class="schedule-dialog" id="schedule-dialog"><form id="slot-form"><h2 class="dialog-title" id="slot-title">Thêm buổi dạy</h2><p class="schedule-note" id="slot-subtitle"></p><input type="hidden" id="slot-class-id"><input type="hidden" id="slot-date"><input type="hidden" id="slot-id"><div class="time-grid"><label>Giờ bắt đầu<input id="slot-start" type="time" required></label><label>Giờ kết thúc<input id="slot-end" type="time" required></label></div><div class="dialog-actions"><button class="btn btn-outline delete-slot" id="delete-slot" type="button" hidden><i class='bx bx-trash'></i> Xóa buổi</button><button class="btn btn-outline" type="button" id="close-dialog">Hủy</button><button class="btn btn-primary" type="submit"><i class='bx bx-save'></i> Lưu thời gian</button></div></form></dialog>
 <style>.class-pause{padding:4px 7px;border:1px solid #f5b642;border-radius:7px;background:transparent;color:#ffd166;cursor:pointer;line-height:1}.class-pause:hover{background:rgba(245,182,66,.16)}.paused-list{display:grid;gap:9px;min-width:340px}.paused-item{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px;border:1px solid var(--border-color);border-radius:10px}.paused-item small{display:block;color:var(--text-muted);margin-top:3px}</style>
 <dialog class="schedule-dialog" id="paused-dialog"><form method="dialog"><h2 class="dialog-title">Lớp tạm dừng</h2><p class="schedule-note">Chọn mở lại để đưa lớp về lịch dạy đang hoạt động.</p><div class="paused-list"><?php foreach ($pausedClasses as $pausedClass): $pausedName = (string) ($pausedClass['course_title'] ?: $pausedClass['class_name']); ?><div class="paused-item"><div><strong><?php echo htmlspecialchars($pausedName); ?></strong><small><?php echo htmlspecialchars($pausedClass['teacher_name'] ?: 'Chưa phân công giáo viên'); ?></small></div><form method="post"><?php echo csrfField(); ?><input type="hidden" name="action" value="resume_class"><input type="hidden" name="class_id" value="<?php echo (int) $pausedClass['id']; ?>"><input type="hidden" name="month" value="<?php echo htmlspecialchars($month); ?>"><button class="btn btn-primary" type="submit">Mở lại</button></form></div><?php endforeach; ?><?php if (!$pausedClasses): ?><p class="schedule-note">Không có lớp nào đang tạm dừng.</p><?php endif; ?></div><div class="dialog-actions"><button class="btn btn-outline" value="cancel">Đóng</button></div></form></dialog>
@@ -370,6 +386,35 @@ require_once '../includes/header.php';
 <style>.create-class-dialog input:not([type="checkbox"]),.create-class-dialog select,.create-class-dialog textarea{box-sizing:border-box;background:var(--input-bg,#101c31)!important;color:var(--text-main)!important;border:1px solid var(--border-color)!important;border-radius:10px!important}.create-class-dialog input:not([type="checkbox"]){min-height:48px;padding:11px 14px}.create-class-dialog input[name="total_sessions"]{max-width:180px}.create-class-dialog fieldset{display:grid;gap:10px;margin:0;border:1px solid var(--border-color);border-radius:12px;padding:14px}.create-class-dialog legend{padding:0 5px;font-weight:800}.create-class-dialog textarea[name="student_names"],.create-class-dialog textarea[name="notes"]{min-height:75px!important;height:75px}.weekday-label{font-weight:700}.weekday-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.weekday-options .weekday-option{display:flex!important;align-items:center;gap:8px;margin:0!important;padding:8px 10px;border:1px solid var(--border-color);border-radius:9px;font-weight:600!important;cursor:pointer}.weekday-options .weekday-option input{width:auto!important;margin:0!important;accent-color:var(--primary)}.weekday-options .weekday-option span{white-space:nowrap}@media(max-width:520px){.weekday-options{grid-template-columns:repeat(2,minmax(0,1fr))}}</style>
 <style>.month-control{padding:5px 6px 5px 12px;border:1px solid var(--border-color);border-radius:12px;background:rgba(8,20,40,.55)}.month-control input[type="month"]{width:170px!important;min-height:42px;padding:8px 10px;border:1px solid transparent!important;border-radius:8px;background:transparent!important;color:var(--text-main)!important;font:700 14px inherit;cursor:pointer}.month-control input[type="month"]:focus{outline:none;border-color:var(--primary)!important;background:rgba(255,255,255,.04)!important}.month-control input[type="month"]::-webkit-calendar-picker-indicator{filter:invert(1);opacity:.9;cursor:pointer}</style>
 <style>.schedule-table{font-size:12px}.schedule-table th{padding:8px 6px}.schedule-table td{min-width:100px;height:48px;padding:4px}.schedule-table td.info-cell{min-width:240px;max-width:240px;padding:7px 10px}.class-meta{margin-top:2px;line-height:1.3}.slot{padding:4px 6px;margin:1px 0;font-size:11px}</style>
+<script>
+(() => {
+  const control = document.querySelector('.month-control');
+  const selectedDate = <?php echo json_encode($selectedDate); ?>;
+  const weekStart = <?php echo json_encode($firstDay->format('d/m')); ?>;
+  const weekEnd = <?php echo json_encode($lastDay->format('d/m/Y')); ?>;
+  if (!control) return;
+  const dateInput = control.querySelector('input[name="month"]');
+  if (dateInput) {
+    dateInput.type = 'date';
+    dateInput.name = 'date';
+    dateInput.value = selectedDate;
+  }
+  const title = control.closest('.month-bar')?.querySelector('h2');
+  if (title) title.innerHTML = "<i class='bx bx-table'></i> Lịch dạy tuần " + weekStart + ' – ' + weekEnd;
+  const submit = control.querySelector('button');
+  if (submit) submit.textContent = 'Xem tuần';
+  const scope = <?php echo json_encode($showOwnSchedule ? 'mine' : ($isAdmin ? 'all' : '')); ?>;
+  if (scope && !control.querySelector('input[name="scope"]')) control.insertAdjacentHTML('afterbegin', '<input type="hidden" name="scope" value="' + scope + '">');
+  const nav = document.createElement('div');
+  nav.className = 'week-nav';
+  const withScope = (date) => '?date=' + date + (scope ? '&scope=' + scope : '');
+  nav.innerHTML = '<a class="btn btn-outline" href="' + withScope(<?php echo json_encode($previousWeek); ?>) + '" title="Tuần trước">‹</a>' +
+    '<a class="btn btn-outline" href="' + withScope(<?php echo json_encode($todayDate); ?>) + '">Hôm nay</a>' +
+    '<a class="btn btn-outline" href="' + withScope(<?php echo json_encode($nextWeek); ?>) + '" title="Tuần sau">›</a>';
+  control.after(nav);
+})();
+</script>
+<style>.month-control input[type="date"]{width:170px!important;min-height:42px;padding:8px 10px;border:1px solid transparent!important;border-radius:8px;background:transparent!important;color:var(--text-main)!important;font:700 14px inherit;cursor:pointer}.month-control input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(1);opacity:.9;cursor:pointer}.week-nav{display:flex;align-items:center;gap:8px}.week-nav .btn{min-height:42px;padding:8px 13px}</style>
 <script>
 (() => { const dialog=document.getElementById('schedule-dialog'), token=<?php echo json_encode(csrfToken()); ?>, form=document.getElementById('slot-form'); const request=async body=>{const res=await fetch(location.href,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...body,csrf_token:token})});const data=await res.json();if(!data.ok)throw new Error(data.message||'Không thể lưu dữ liệu.');return data}; const open=(cell,slot)=>{document.getElementById('slot-class-id').value=cell.dataset.classId;document.getElementById('slot-date').value=cell.dataset.date;document.getElementById('slot-id').value=slot?.dataset.slotId||'';document.getElementById('slot-start').value=slot?.dataset.start||'08:00';document.getElementById('slot-end').value=slot?.dataset.end||'09:30';document.getElementById('slot-title').textContent=slot?'Chỉnh sửa buổi dạy':'Thêm buổi dạy';document.getElementById('slot-subtitle').textContent=cell.dataset.className+' · '+new Date(cell.dataset.date+'T00:00:00').toLocaleDateString('vi-VN');document.getElementById('delete-slot').hidden=!slot;dialog.showModal()}; document.querySelectorAll('.schedule-cell').forEach(cell=>cell.addEventListener('click',event=>{const slot=event.target.closest('.slot');open(cell,slot)}));document.getElementById('close-dialog').addEventListener('click',()=>dialog.close());form.addEventListener('submit',async event=>{event.preventDefault();try{await request({action:'save_slot',class_id:+document.getElementById('slot-class-id').value,slot_id:+document.getElementById('slot-id').value,date:document.getElementById('slot-date').value,start_time:document.getElementById('slot-start').value,end_time:document.getElementById('slot-end').value});location.reload()}catch(error){alert(error.message)}});document.getElementById('delete-slot').addEventListener('click',async()=>{if(!confirm('Xóa buổi dạy này?'))return;try{await request({action:'delete_slot',class_id:+document.getElementById('slot-class-id').value,slot_id:+document.getElementById('slot-id').value});location.reload()}catch(error){alert(error.message)}})})();
 </script>
@@ -384,6 +429,7 @@ require_once '../includes/header.php';
   document.querySelector('h1')?.after(createClassButton);
   document.getElementById('close-create-class')?.addEventListener('click', () => createClassDialog.close());
   const createForm = createClassDialog.querySelector('form');
+  createForm.insertAdjacentHTML('afterbegin', '<input type="hidden" name="scope" value="<?php echo $showOwnSchedule ? 'mine' : 'all'; ?>">');
   const plannedSchedule = document.createElement('fieldset');
   plannedSchedule.innerHTML = `<legend>Lịch học dự kiến <small>(tự tạo lịch)</small></legend><label>Số buổi<input type="number" name="total_sessions" min="0" max="500" value="0"><small>Để 0 nếu chưa muốn tự tạo lịch.</small></label><div class="weekday-label">Thứ học</div><div class="weekday-options"><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="1" checked><span>Thứ 2</span></label><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="2"><span>Thứ 3</span></label><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="3" checked><span>Thứ 4</span></label><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="4"><span>Thứ 5</span></label><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="5" checked><span>Thứ 6</span></label><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="6"><span>Thứ 7</span></label><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="7"><span>Chủ nhật</span></label></div><div class="time-grid"><label>Ngày bắt đầu<input type="date" name="planned_start_date" value="<?php echo date('Y-m-d'); ?>"></label><label>Giờ bắt đầu<input type="time" name="planned_start_time" value="08:00"></label><label>Giờ kết thúc<input type="time" name="planned_end_time" value="09:30"></label></div>`;
   createForm.querySelector('.dialog-actions').before(plannedSchedule);
@@ -467,6 +513,9 @@ require_once '../includes/header.php';
   });
   document.getElementById('close-class-dialog')?.addEventListener('click', () => classDialog.close());
   const pausedDialog = document.getElementById('paused-dialog');
+  pausedDialog?.querySelectorAll('form[method="post"]').forEach((form) => {
+    form.insertAdjacentHTML('afterbegin', '<input type="hidden" name="scope" value="<?php echo $showOwnSchedule ? 'mine' : 'all'; ?>">');
+  });
   const pausedButton = document.createElement('button');
   pausedButton.type = 'button'; pausedButton.className = 'btn btn-outline';
   pausedButton.innerHTML = `<i class='bx bx-pause-circle'></i> Lớp tạm dừng (<?php echo count($pausedClasses); ?>)`;
@@ -537,6 +586,44 @@ require_once '../includes/header.php';
       });
     });
   }
+})();
+</script>
+<script>
+(() => {
+  const form = document.getElementById('slot-form');
+  const grid = form?.querySelector('.time-grid');
+  if (!form || !grid) return;
+  const options = <?php echo json_encode($substituteTeachers, JSON_UNESCAPED_UNICODE); ?>;
+  const label = document.createElement('label');
+  label.innerHTML = 'Giáo viên dạy thay <select id="slot-substitute-teacher"><option value="">Giáo viên phụ trách lớp</option></select><small>Chỉ áp dụng cho buổi này; lịch sẽ hiện ở tài khoản giáo viên dạy thay.</small>';
+  const select = label.querySelector('select');
+  options.forEach((teacher) => {
+    const option = document.createElement('option');
+    option.value = teacher.id; option.textContent = teacher.name; select.append(option);
+  });
+  grid.after(label);
+  const slotSubstitutes = <?php $slotSubstituteMap = []; foreach ($slots as $classSlots) foreach ($classSlots as $dateSlots) foreach ($dateSlots as $savedSlot) $slotSubstituteMap[(int) $savedSlot['id']] = (int) ($savedSlot['substitute_teacher_id'] ?? 0); echo json_encode($slotSubstituteMap); ?>;
+  document.querySelectorAll('.schedule-cell').forEach((cell) => cell.addEventListener('click', (event) => {
+    const slot = event.target.closest('.slot');
+    select.value = slot ? String(slotSubstitutes[slot.dataset.slotId] || '') : '';
+  }));
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault(); event.stopImmediatePropagation();
+    try {
+      const response = await fetch(location.href, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({
+        action: 'save_slot', csrf_token: <?php echo json_encode(csrfToken()); ?>,
+        class_id: +document.getElementById('slot-class-id').value,
+        slot_id: +document.getElementById('slot-id').value,
+        date: document.getElementById('slot-date').value,
+        start_time: document.getElementById('slot-start').value,
+        end_time: document.getElementById('slot-end').value,
+        substitute_teacher_id: +select.value
+      })});
+      const result = await response.json();
+      if (!result.ok) throw new Error(result.message || 'Không thể lưu ca dạy.');
+      location.reload();
+    } catch (error) { alert(error.message); }
+  }, true);
 })();
 </script>
 <?php require_once '../includes/footer.php'; ?>

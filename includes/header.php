@@ -839,6 +839,15 @@ $unreadNotifications ??= 0;
             <?php
             $parts = explode('/', str_replace('\\', '/', $_SERVER['PHP_SELF']));
             $current_page = $parts[count($parts)-2] . '/' . $parts[count($parts)-1];
+            $isMenuActive = static function (array $item) use ($current_page): bool {
+                if (!in_array($current_page, $item['match'], true)) return false;
+                if ($current_page !== 'admin/teaching_schedule.php') return true;
+                $url = (string) ($item['url'] ?? '');
+                $ownSchedule = ((string) ($_GET['scope'] ?? '')) === 'mine';
+                if (str_contains($url, 'scope=mine')) return $ownSchedule;
+                if (str_contains($url, 'scope=all')) return !$ownSchedule;
+                return true;
+            };
             
             if ($role === 'admin') {
                 $menuGroups = [
@@ -854,7 +863,8 @@ $unreadNotifications ??= 0;
                         ['url' => '../teacher/question_bank.php', 'icon' => 'bx-library', 'label' => 'Ngân hàng câu hỏi', 'match' => ['teacher/question_bank.php']],
                     ]],
                     ['id' => 'teaching-schedule', 'label' => 'Lịch dạy', 'icon' => 'bx-calendar-event', 'items' => [
-                        ['url' => '../admin/teaching_schedule.php', 'icon' => 'bx-calendar-event', 'label' => 'Xếp lớp & Lịch dạy', 'match' => ['admin/teaching_schedule.php']],
+                        ['url' => '../admin/teaching_schedule.php?scope=all', 'icon' => 'bx-calendar-event', 'label' => 'Xếp lớp & Lịch dạy', 'match' => ['admin/teaching_schedule.php']],
+                        ['url' => '../admin/teaching_schedule.php?scope=mine', 'icon' => 'bx-calendar-check', 'label' => 'Lịch dạy của tôi', 'match' => ['admin/teaching_schedule.php']],
                         ['url' => '../admin/teacher_schedules.php', 'icon' => 'bx-group', 'label' => 'Lịch của giáo viên', 'match' => ['admin/teacher_schedules.php']],
                     ]],
                     ['id' => 'monitoring', 'label' => 'Theo dõi & AI', 'icon' => 'bx-line-chart', 'items' => [
@@ -883,7 +893,7 @@ $unreadNotifications ??= 0;
                         ['url' => '../teacher/question_bank.php', 'icon' => 'bx-library', 'label' => 'Ngân hàng câu hỏi', 'match' => ['teacher/question_bank.php']],
                     ]],
                     ['id' => 'teacher-schedule', 'label' => 'Lịch dạy', 'icon' => 'bx-calendar-event', 'items' => [
-                        ['url' => '../admin/teaching_schedule.php', 'icon' => 'bx-calendar-event', 'label' => 'Lịch dạy của tôi', 'match' => ['admin/teaching_schedule.php']],
+                        ['url' => '../admin/teaching_schedule.php', 'icon' => 'bx-calendar-check', 'label' => 'Lịch dạy của tôi', 'match' => ['admin/teaching_schedule.php']],
                         ...($role === 'administrative_staff' ? [[
                             'url' => '../admin/teacher_schedules.php', 'icon' => 'bx-group', 'label' => 'Lịch của giáo viên', 'match' => ['admin/teacher_schedules.php'],
                         ]] : []),
@@ -927,13 +937,13 @@ $unreadNotifications ??= 0;
             foreach ($menuGroups as $group) {
                 $groupActive = false;
                 foreach ($group['items'] as $item) {
-                    if (in_array($current_page, $item['match'], true)) { $groupActive = true; break; }
+                    if ($isMenuActive($item)) { $groupActive = true; break; }
                 }
                 echo '<section class="sidebar-group' . ($groupActive ? ' has-active' : ' collapsed') . '" data-sidebar-group="' . htmlspecialchars($group['id']) . '">';
                 echo '<button type="button" class="sidebar-group-toggle" aria-expanded="' . ($groupActive ? 'true' : 'false') . '"><i class="bx ' . htmlspecialchars($group['icon']) . '"></i><span>' . htmlspecialchars($group['label']) . '</span><i class="bx bx-chevron-down group-chevron"></i></button>';
                 echo '<div class="sidebar-group-items"><div class="sidebar-group-items-inner">';
                 foreach ($group['items'] as $menu) {
-                    $isActive = in_array($current_page, $menu['match'], true) ? 'active' : '';
+                    $isActive = $isMenuActive($menu) ? 'active' : '';
                     echo '<a href="' . htmlspecialchars($menu['url']) . '" class="menu-item ' . $isActive . '"><i class="bx ' . htmlspecialchars($menu['icon']) . '"></i> ' . htmlspecialchars($menu['label']) . '</a>';
                 }
                 echo '</div></div></section>';
@@ -981,6 +991,37 @@ $unreadNotifications ??= 0;
                     const toggle = group.querySelector('.sidebar-group-toggle');
                     if (toggle) toggle.setAttribute('aria-expanded', String(!isCollapsed));
                 }
+            });
+        })();
+
+        // Giữ nguyên vị trí cuộn của menu khi chuyển sang trang khác.
+        // Dùng sessionStorage để mỗi tab trình duyệt có vị trí riêng và tự xóa khi đóng tab.
+        (function () {
+            const storageKey = 'lms_sidebar_menu_scroll_top';
+            const sidebarMenu = document.querySelector('.sidebar-menu');
+            if (!sidebarMenu) return;
+
+            const savedPosition = Number(sessionStorage.getItem(storageKey));
+            const restorePosition = function () {
+                if (Number.isFinite(savedPosition) && savedPosition > 0) {
+                    sidebarMenu.scrollTop = savedPosition;
+                }
+            };
+
+            // Khôi phục ngay và lặp lại sau một khung hình để không bị ảnh hưởng
+            // bởi animation/mở nhóm menu khi trang vừa tải xong.
+            restorePosition();
+            requestAnimationFrame(restorePosition);
+            window.addEventListener('load', restorePosition, { once: true });
+
+            const savePosition = function () {
+                sessionStorage.setItem(storageKey, String(sidebarMenu.scrollTop));
+            };
+
+            sidebarMenu.addEventListener('scroll', savePosition, { passive: true });
+            window.addEventListener('pagehide', savePosition);
+            document.querySelectorAll('.sidebar-menu a').forEach(function (link) {
+                link.addEventListener('click', savePosition);
             });
         })();
     </script>
