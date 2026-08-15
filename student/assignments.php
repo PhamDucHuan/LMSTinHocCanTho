@@ -6,13 +6,13 @@ require_once '../includes/friendly_urls.php';
 /** @var PDO $pdo */
 ensureFriendlyUrls($pdo);
 
-if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_role'], ['student', 'admin', 'teacher'], true)) {
+if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_role'], ['student', 'admin', 'teacher', 'administrative_staff'], true)) {
     header('Location: ../index.php');
     exit;
 }
 
 $userId = (int) $_SESSION['user_id'];
-$isStaff = in_array($_SESSION['user_role'], ['admin', 'teacher'], true);
+$isStaff = in_array($_SESSION['user_role'], ['admin', 'teacher', 'administrative_staff'], true);
 $selectedCourseId = filter_input(INPUT_GET, 'course_id', FILTER_VALIDATE_INT);
 $selectedCourseId = $selectedCourseId === false ? null : $selectedCourseId;
 $selectedCourseSlug = trim((string) ($_GET['course'] ?? ''));

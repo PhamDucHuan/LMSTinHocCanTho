@@ -4,7 +4,7 @@ secureSessionStart();
 require_once '../config/database.php';
 /** @var PDO $pdo */
 
-if (empty($_SESSION['user_id']) || !in_array($_SESSION['user_role'] ?? '', ['teacher', 'admin'], true)) {
+if (empty($_SESSION['user_id']) || !in_array($_SESSION['user_role'] ?? '', ['teacher', 'administrative_staff', 'admin'], true)) {
     header('Location: ../index.php');
     exit;
 }
@@ -87,7 +87,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                           JOIN courses c ON c.id = ce.course_id 
                           WHERE ce.course_id = ? AND ce.student_id = ?";
             $params = [$cId, $sId];
-            if ($_SESSION['user_role'] === 'teacher') {
+            if ($_SESSION['user_role'] !== 'admin') {
                 $authCheck .= " AND c.teacher_id = ?";
                 $params[] = (int)$_SESSION['user_id'];
             }
@@ -129,7 +129,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 $courseFilter = filter_input(INPUT_GET, 'course_id', FILTER_VALIDATE_INT);
 $conditions = [];
 $parameters = [];
-if ($_SESSION['user_role'] === 'teacher') {
+if ($_SESSION['user_role'] !== 'admin') {
     $conditions[] = 'c.teacher_id = ?';
     $parameters[] = (int) $_SESSION['user_id'];
 }
@@ -139,11 +139,11 @@ if ($courseFilter) {
 }
 $whereSql = $conditions ? 'WHERE ' . implode(' AND ', $conditions) : '';
 
-$courseSql = $_SESSION['user_role'] === 'teacher'
+$courseSql = $_SESSION['user_role'] !== 'admin'
     ? 'SELECT id, title FROM courses WHERE teacher_id=? ORDER BY title'
     : 'SELECT id, title FROM courses ORDER BY title';
 $courseStmt = $pdo->prepare($courseSql);
-$courseStmt->execute($_SESSION['user_role'] === 'teacher' ? [(int) $_SESSION['user_id']] : []);
+$courseStmt->execute($_SESSION['user_role'] !== 'admin' ? [(int) $_SESSION['user_id']] : []);
 $availableCourses = $courseStmt->fetchAll();
 
 // Fetch upcoming exams (<= 7 days) for the modal
@@ -157,7 +157,7 @@ $upcomingSql = "
       AND ce.exam_date <= DATE_ADD(CURDATE(), INTERVAL 7 DAY)
 ";
 $upcomingParams = [];
-if ($_SESSION['user_role'] === 'teacher') {
+if ($_SESSION['user_role'] !== 'admin') {
     $upcomingSql .= " AND c.teacher_id = ?";
     $upcomingParams[] = (int) $_SESSION['user_id'];
 }
@@ -209,7 +209,7 @@ $quizBestConditions = [
     'qa.score IS NOT NULL',
 ];
 $quizBestParameters = [];
-if ($_SESSION['user_role'] === 'teacher') {
+if ($_SESSION['user_role'] !== 'admin') {
     $quizBestConditions[] = 'c.teacher_id=?';
     $quizBestParameters[] = (int) $_SESSION['user_id'];
 }

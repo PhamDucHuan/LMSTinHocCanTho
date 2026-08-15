@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 require_once '../includes/security.php';
 secureSessionStart();
-requireRole(['student', 'teacher', 'admin']);
+requireRole(['student', 'teacher', 'administrative_staff', 'admin']);
 require_once '../config/database.php';
 require_once '../includes/notifications.php';
 

@@ -2,7 +2,7 @@
 declare(strict_types=1);
 require_once '../includes/security.php';
 secureSessionStart();
-requireRole(['teacher','admin']);
+requireRole(['teacher', 'administrative_staff', 'admin']);
 require_once '../config/database.php';
 require_once '../includes/question_bank.php';
 require_once '../includes/quiz_import.php';
@@ -240,7 +240,7 @@ $stmt=$pdo->prepare('SELECT qb.*,qt.name topic_name,u.name teacher_name FROM que
 $questionVersions=[];
 if($questions){$questionIds=array_map('intval',array_column($questions,'id'));$versionStmt=$pdo->query('SELECT id,question_id,version_number,created_at FROM question_bank_versions WHERE question_id IN ('.implode(',',$questionIds).') ORDER BY question_id,version_number DESC');foreach($versionStmt->fetchAll() as $version)$questionVersions[(int)$version['question_id']][]=$version;}
 $pageUrl=static function(int $page):string{$query=$_GET;unset($query['action']);$query['page']=$page;return '?'.http_build_query($query);};
-$coursesStmt=$isAdmin?$pdo->query('SELECT id,title FROM courses ORDER BY title'):$pdo->prepare('SELECT id,title FROM courses WHERE teacher_id=? ORDER BY title');if(!$isAdmin)$coursesStmt->execute([$actorId]);$courses=$coursesStmt->fetchAll();$teachers=$isAdmin?$pdo->query("SELECT id,name,role FROM users WHERE role IN ('teacher','admin') ORDER BY FIELD(role,'admin','teacher'),name")->fetchAll():[];
+$coursesStmt=$isAdmin?$pdo->query('SELECT id,title FROM courses ORDER BY title'):$pdo->prepare('SELECT id,title FROM courses WHERE teacher_id=? ORDER BY title');if(!$isAdmin)$coursesStmt->execute([$actorId]);$courses=$coursesStmt->fetchAll();$teachers=$isAdmin?$pdo->query("SELECT id,name,role FROM users WHERE role IN ('teacher','administrative_staff','admin') ORDER BY FIELD(role,'admin','administrative_staff','teacher'),name")->fetchAll():[];
 $page_title='Ngân hàng câu hỏi';require_once '../includes/header.php';
 ?>
 <style>

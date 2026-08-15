@@ -79,7 +79,7 @@ if (isset($_GET['code'])) {
     session_regenerate_id(true);
     // Google login is remembered for 30 days on this browser.
     issueRememberLoginToken($pdo, (int) $_SESSION['user_id']);
-    if ($_SESSION['user_role'] === 'teacher') {
+    if (in_array($_SESSION['user_role'], ['teacher', 'administrative_staff'], true)) {
         header('Location: ../teacher/dashboard.php');
     } elseif ($_SESSION['user_role'] === 'admin') {
         header('Location: ../admin/dashboard.php');

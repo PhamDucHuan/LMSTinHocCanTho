@@ -2,7 +2,7 @@
 declare(strict_types=1);
 require_once '../includes/security.php';
 secureSessionStart();
-requireRole(['admin', 'teacher']);
+requireRole(['admin', 'teacher', 'administrative_staff']);
 require_once '../config/database.php';
 global $pdo;
 

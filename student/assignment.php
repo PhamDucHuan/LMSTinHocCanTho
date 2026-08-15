@@ -30,11 +30,11 @@ if ($isAjaxRequest) {
     });
 }
 
-if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_role'], ['student', 'teacher', 'admin'], true)) {
+if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_role'], ['student', 'teacher', 'administrative_staff', 'admin'], true)) {
     header('Location: ../index.php');
     exit;
 }
-$previewMode = $_SESSION['user_role'] === 'teacher';
+$previewMode = in_array($_SESSION['user_role'], ['teacher', 'administrative_staff'], true);
 $adminTestMode = $_SESSION['user_role'] === 'admin';
 
 function allowedExtensionsForModule(string $moduleName): array

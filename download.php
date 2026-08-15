@@ -4,7 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/includes/security.php';
 require_once __DIR__ . '/includes/authorization.php';
 secureSessionStart();
-if (empty($_SESSION['user_id']) || !in_array($_SESSION['user_role'] ?? '', ['student', 'teacher', 'admin'], true)) {
+if (empty($_SESSION['user_id']) || !in_array($_SESSION['user_role'] ?? '', ['student', 'teacher', 'administrative_staff', 'admin'], true)) {
     header('Location: index.php');
     exit;
 }
@@ -53,7 +53,7 @@ if ($kind === 'submission') {
         exit('Không tìm thấy bài tập.');
     }
     $allowed = $role === 'admin'
-        || ($role === 'teacher' && (int) $assignment['teacher_id'] === $userId);
+        || (in_array($role, ['teacher', 'administrative_staff'], true) && (int) $assignment['teacher_id'] === $userId);
     if ($role === 'student') {
         if ($assignment['course_id'] === null) {
             $allowed = true;

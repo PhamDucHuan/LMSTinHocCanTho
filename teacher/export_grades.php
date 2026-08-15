@@ -5,7 +5,7 @@ require_once '../includes/authorization.php';
 secureSessionStart();
 require_once '../config/database.php';
 
-if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_role'], ['teacher','admin'], true)) {
+if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_role'], ['teacher', 'administrative_staff', 'admin'], true)) {
     header('Location: ../index.php'); exit;
 }
 
@@ -21,7 +21,7 @@ if (!$assignmentId && !$courseId) {
 // Build query
 $conditions = [];
 $params = [];
-if ($_SESSION['user_role'] === 'teacher') {
+if ($_SESSION['user_role'] !== 'admin') {
     $conditions[] = 'c.teacher_id = ?';
     $params[] = (int)$_SESSION['user_id'];
 }

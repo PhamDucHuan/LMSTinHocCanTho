@@ -8,13 +8,13 @@ require_once '../includes/notifications.php';
 ensureFriendlyUrls($pdo);
 /** @var PDO $pdo Kết nối cơ sở dữ liệu được khởi tạo trong config/database.php. */
 
-if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_role'], ['student', 'admin', 'teacher'])) {
+if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_role'], ['student', 'admin', 'teacher', 'administrative_staff'], true)) {
     header('Location: ../index.php');
     exit;
 }
 
 $student_id = $_SESSION['user_id'];
-$is_staff = in_array($_SESSION['user_role'], ['admin', 'teacher']);
+$is_staff = in_array($_SESSION['user_role'], ['admin', 'teacher', 'administrative_staff'], true);
 $shortCourseDescription = static function (?string $description, int $limit = 140): string {
     $description = trim((string) $description);
     if ($description === '') return 'Chưa có mô tả cho khóa học này.';

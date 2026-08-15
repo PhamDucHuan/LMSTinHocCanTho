@@ -4,7 +4,7 @@ secureSessionStart();
 require_once '../config/database.php';
 require_once '../includes/friendly_urls.php';
 
-if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_role'], ['teacher', 'admin'])) {
+if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_role'], ['teacher', 'administrative_staff', 'admin'], true)) {
     header('Location: ../index.php');
     exit;
 }

@@ -11,7 +11,7 @@ if (!isset($pdo) || !($pdo instanceof PDO)) {
     die('Không thể kết nối đến cơ sở dữ liệu.');
 }
 
-if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_role'], ['teacher', 'admin'])) {
+if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_role'], ['teacher', 'administrative_staff', 'admin'], true)) {
     header('Location: ../index.php');
     exit;
 }

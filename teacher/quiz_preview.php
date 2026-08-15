@@ -2,7 +2,7 @@
 declare(strict_types=1);
 require_once '../includes/security.php';
 secureSessionStart();
-requireRole(['teacher','admin']);
+requireRole(['teacher', 'administrative_staff', 'admin']);
 require_once '../config/database.php';
 $quizId=(int)($_GET['id']??0);$isAdmin=($_SESSION['user_role']??'')==='admin';
 $stmt=$pdo->prepare('SELECT q.*,c.title course_title FROM quizzes q JOIN courses c ON c.id=q.course_id WHERE q.id=?'.($isAdmin?'':' AND q.teacher_id=?'));

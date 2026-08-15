@@ -87,7 +87,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if ($user['role'] === 'admin') {
                 header('Location: ../admin/dashboard.php');
-            } elseif ($user['role'] === 'teacher') {
+            } elseif (in_array($user['role'], ['teacher', 'administrative_staff'], true)) {
                 header('Location: ../teacher/dashboard.php');
             } else {
                 header('Location: ../student/dashboard.php');

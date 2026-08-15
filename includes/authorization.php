@@ -4,13 +4,13 @@ declare(strict_types=1);
 /** Central policies kept free of session state so they are easy to test. */
 function authorizationCanManageOwnedResource(string $role, int $actorId, int $ownerId): bool
 {
-    return $role === 'admin' || ($role === 'teacher' && $actorId === $ownerId);
+    return $role === 'admin' || (in_array($role, ['teacher', 'administrative_staff'], true) && $actorId === $ownerId);
 }
 
 function authorizationCanAccessAssignment(string $role, int $actorId, int $teacherId, ?int $courseId, bool $isEnrolled): bool
 {
     if ($role === 'admin') return true;
-    if ($role === 'teacher') return $actorId === $teacherId;
+    if (in_array($role, ['teacher', 'administrative_staff'], true)) return $actorId === $teacherId;
     return $role === 'student' && ($courseId === null || $isEnrolled);
 }
 
@@ -22,7 +22,7 @@ function authorizationCanTakeQuiz(string $role, bool $isPublished): bool
 function authorizationCanDownloadSubmission(string $role, int $actorId, int $teacherId, int $studentId): bool
 {
     return $role === 'admin'
-        || ($role === 'teacher' && $actorId === $teacherId)
+        || (in_array($role, ['teacher', 'administrative_staff'], true) && $actorId === $teacherId)
         || ($role === 'student' && $actorId === $studentId);
 }
 

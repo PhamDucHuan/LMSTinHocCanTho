@@ -22,7 +22,7 @@ if ($pdo === null) {
     }
 }
 
-if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_role'], ['teacher', 'admin'])) {
+if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_role'], ['teacher', 'administrative_staff', 'admin'], true)) {
     header('Location: ../index.php');
     exit;
 }
@@ -45,7 +45,7 @@ if (!$assignment_id) {
 
     $filterStudentConditions = [];
     $filterStudentParameters = [];
-    if ($_SESSION['user_role'] === 'teacher') {
+    if ($_SESSION['user_role'] !== 'admin') {
         $filterStudentConditions[] = 'c.teacher_id=?';
         $filterStudentParameters[] = (int) $_SESSION['user_id'];
     }

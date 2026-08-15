@@ -3,7 +3,7 @@ require_once '../includes/security.php';
 secureSessionStart();
 header('Content-Type: application/json');
 
-if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_role'], ['teacher', 'admin'])) {
+if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_role'], ['teacher', 'administrative_staff', 'admin'], true)) {
     echo json_encode(['status' => 'error', 'message' => 'Unauthorized']);
     exit;
 }

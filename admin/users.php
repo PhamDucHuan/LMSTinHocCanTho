@@ -82,7 +82,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     $newRole = (string) ($_POST['role'] ?? '');
-    if ($action === 'change_role' && $targetUserId > 0 && in_array($newRole, ['student', 'teacher', 'admin'], true)) {
+    if ($action === 'change_role' && $targetUserId > 0 && in_array($newRole, ['student', 'teacher', 'administrative_staff', 'admin'], true)) {
         if ($targetUserId === (int) $_SESSION['user_id']) {
             $_SESSION['error'] = 'Bạn không thể tự thay đổi quyền của mình.';
         } else {
@@ -182,7 +182,8 @@ require_once '../includes/header.php';
                 <td><strong><?php echo htmlspecialchars($user['name']); ?></strong></td>
                 <td><?php echo htmlspecialchars($user['email']); ?></td>
                 <td><?php echo date('d/m/Y', strtotime($user['created_at'])); ?></td>
-                <td><span class="status <?php echo $user['role'] === 'admin' ? 'admin' : ($user['role'] === 'teacher' ? 'done' : 'pending'); ?>"><?php echo strtoupper($user['role']); ?></span></td>
+                <?php $roleLabels = ['student' => 'HỌC VIÊN', 'teacher' => 'GIÁO VIÊN', 'administrative_staff' => 'NHÂN VIÊN HÀNH CHÍNH', 'admin' => 'ADMIN']; ?>
+                <td><span class="status <?php echo $user['role'] === 'admin' ? 'admin' : (in_array($user['role'], ['teacher', 'administrative_staff'], true) ? 'done' : 'pending'); ?>"><?php echo htmlspecialchars($roleLabels[$user['role']] ?? strtoupper((string) $user['role'])); ?></span></td>
                 <td>
                     <?php if (empty($user['is_approved'])): ?>
                         <span class="status pending">CHỜ DUYỆT</span>
@@ -197,9 +198,10 @@ require_once '../includes/header.php';
                             <input type="hidden" name="return_page" value="<?php echo $currentPage; ?>">
                             <input type="hidden" name="action" value="change_role">
                             <input type="hidden" name="user_id" value="<?php echo (int) $user['id']; ?>">
-                            <select name="role" style="padding:8px;width:120px;font-size:13px;" <?php echo ($isSelf || empty($user['is_approved'])) ? 'disabled' : ''; ?>>
+                            <select name="role" style="padding:8px;width:190px;font-size:13px;" <?php echo ($isSelf || empty($user['is_approved'])) ? 'disabled' : ''; ?>>
                                 <option value="student" <?php echo $user['role'] === 'student' ? 'selected' : ''; ?>>Student</option>
                                 <option value="teacher" <?php echo $user['role'] === 'teacher' ? 'selected' : ''; ?>>Teacher</option>
+                                <option value="administrative_staff" <?php echo $user['role'] === 'administrative_staff' ? 'selected' : ''; ?>>Nhân viên hành chính</option>
                                 <option value="admin" <?php echo $user['role'] === 'admin' ? 'selected' : ''; ?>>Admin</option>
                             </select>
                             <button class="btn btn-outline" style="padding:8px 12px;font-size:13px;" <?php echo ($isSelf || empty($user['is_approved'])) ? 'disabled' : ''; ?>>Lưu</button>

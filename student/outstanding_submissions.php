@@ -14,7 +14,7 @@ if (!isset($pdo)) {
     }
 }
 
-if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_role'], ['student', 'admin', 'teacher'])) {
+if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_role'], ['student', 'admin', 'teacher', 'administrative_staff'], true)) {
     header('Location: ../index.php');
     exit;
 }

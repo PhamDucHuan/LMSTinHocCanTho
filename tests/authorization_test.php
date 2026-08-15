@@ -9,6 +9,8 @@ function authAssert(bool $condition): void { if (!$condition) throw new RuntimeE
 authTest('Admin manages every resource', fn() => authAssert(authorizationCanManageOwnedResource('admin', 1, 99)));
 authTest('Teacher manages own resource', fn() => authAssert(authorizationCanManageOwnedResource('teacher', 7, 7)));
 authTest('Teacher cannot manage another resource', fn() => authAssert(!authorizationCanManageOwnedResource('teacher', 7, 8)));
+authTest('Administrative staff manages own teaching resource', fn() => authAssert(authorizationCanManageOwnedResource('administrative_staff', 7, 7)));
+authTest('Administrative staff cannot modify another teacher resource', fn() => authAssert(!authorizationCanManageOwnedResource('administrative_staff', 7, 8)));
 authTest('Student cannot manage teaching resources', fn() => authAssert(!authorizationCanManageOwnedResource('student', 7, 7)));
 authTest('Enrolled student accesses assignment', fn() => authAssert(authorizationCanAccessAssignment('student', 20, 7, 5, true)));
 authTest('Unenrolled student cannot access assignment or AI exam', fn() => authAssert(!authorizationCanAccessAssignment('student', 20, 7, 5, false)));
@@ -23,6 +25,10 @@ authTest('Student downloads only own submission', function (): void {
 authTest('Teacher downloads only own assignment submissions', function (): void {
     authAssert(authorizationCanDownloadSubmission('teacher', 7, 7, 20));
     authAssert(!authorizationCanDownloadSubmission('teacher', 8, 7, 20));
+});
+authTest('Administrative staff downloads only own assignment submissions', function (): void {
+    authAssert(authorizationCanDownloadSubmission('administrative_staff', 7, 7, 20));
+    authAssert(!authorizationCanDownloadSubmission('administrative_staff', 8, 7, 20));
 });
 
 $failures = 0;

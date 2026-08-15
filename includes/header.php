@@ -3,6 +3,12 @@ require_once __DIR__ . '/security.php';
 require_once __DIR__ . '/notifications.php';
 secureSessionStart();
 $role = $_SESSION['user_role'] ?? '';
+$roleLabel = [
+    'admin' => 'Admin',
+    'teacher' => 'Giáo viên',
+    'administrative_staff' => 'Nhân viên hành chính',
+    'student' => 'Học viên',
+][$role] ?? $role;
 $user_name = $_SESSION['user_name'] ?? 'User';
 $user_avatar = filter_var($_SESSION['user_avatar'] ?? '', FILTER_VALIDATE_URL) ?: null;
 $page_title = $page_title ?? 'LMS Dashboard';
@@ -821,7 +827,7 @@ $unreadNotifications ??= 0;
     <!-- Sidebar -->
     <aside class="sidebar">
         <div class="sidebar-header">
-            <a href="<?php echo $role === 'admin' ? '../admin/dashboard.php' : ($role === 'teacher' ? '../teacher/dashboard.php' : '../student/dashboard.php'); ?>" class="sidebar-brand" aria-label="Tin học Cần Thơ - Trang tổng quan">
+            <a href="<?php echo $role === 'admin' ? '../admin/dashboard.php' : (in_array($role, ['teacher', 'administrative_staff'], true) ? '../teacher/dashboard.php' : '../student/dashboard.php'); ?>" class="sidebar-brand" aria-label="Tin học Cần Thơ - Trang tổng quan">
                 <img src="../assets/images/Logo2.png" alt="Tin học Cần Thơ">
             </a>
             <button id="sidebar-toggle-close" style="background: transparent; border: none; color: var(--text-muted); font-size: 28px; cursor: pointer; padding: 0; display: flex; align-items: center; justify-content: center; transition: 0.3s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='var(--text-muted)'">
@@ -847,6 +853,10 @@ $unreadNotifications ??= 0;
                         ['url' => '../teacher/student_progress.php', 'icon' => 'bx-line-chart', 'label' => 'Tiến độ Học viên', 'match' => ['teacher/student_progress.php']],
                         ['url' => '../teacher/question_bank.php', 'icon' => 'bx-library', 'label' => 'Ngân hàng câu hỏi', 'match' => ['teacher/question_bank.php']],
                     ]],
+                    ['id' => 'teaching-schedule', 'label' => 'Lịch dạy', 'icon' => 'bx-calendar-event', 'items' => [
+                        ['url' => '../admin/teaching_schedule.php', 'icon' => 'bx-calendar-event', 'label' => 'Xếp lớp & Lịch dạy', 'match' => ['admin/teaching_schedule.php']],
+                        ['url' => '../admin/teacher_schedules.php', 'icon' => 'bx-group', 'label' => 'Lịch của giáo viên', 'match' => ['admin/teacher_schedules.php']],
+                    ]],
                     ['id' => 'monitoring', 'label' => 'Theo dõi & AI', 'icon' => 'bx-line-chart', 'items' => [
                         ['url' => '../admin/ai_grading.php', 'icon' => 'bx-bot', 'label' => 'Giám sát chấm AI', 'match' => ['admin/ai_grading.php']],
                         ['url' => '../admin/audit_logs.php', 'icon' => 'bx-history', 'label' => 'Nhật ký hoạt động', 'match' => ['admin/audit_logs.php']],
@@ -861,7 +871,7 @@ $unreadNotifications ??= 0;
                         ['url' => '../student/dashboard.php', 'icon' => 'bx-book-reader', 'label' => 'Giao diện Học viên', 'match' => ['student/dashboard.php', 'student/assignment.php', 'student/outstanding_submissions.php']],
                     ]],
                 ];
-            } elseif ($role === 'teacher') {
+            } elseif (in_array($role, ['teacher', 'administrative_staff'], true)) {
                 $menuGroups = [
                     ['id' => 'teacher-overview', 'label' => 'Tổng quan', 'icon' => 'bx-home-alt', 'items' => [
                         ['url' => '../teacher/dashboard.php', 'icon' => 'bx-bar-chart-alt-2', 'label' => 'Bảng điều khiển', 'match' => ['teacher/dashboard.php']],
@@ -871,6 +881,12 @@ $unreadNotifications ??= 0;
                         ['url' => '../teacher/assignments.php', 'icon' => 'bx-book-content', 'label' => 'Danh sách Bài tập', 'match' => ['teacher/assignments.php', 'teacher/edit_assignment.php']],
                         ['url' => '../teacher/create_assignment.php', 'icon' => 'bx-plus-circle', 'label' => 'Giao Bài Mới', 'match' => ['teacher/create_assignment.php']],
                         ['url' => '../teacher/question_bank.php', 'icon' => 'bx-library', 'label' => 'Ngân hàng câu hỏi', 'match' => ['teacher/question_bank.php']],
+                    ]],
+                    ['id' => 'teacher-schedule', 'label' => 'Lịch dạy', 'icon' => 'bx-calendar-event', 'items' => [
+                        ['url' => '../admin/teaching_schedule.php', 'icon' => 'bx-calendar-event', 'label' => 'Lịch dạy của tôi', 'match' => ['admin/teaching_schedule.php']],
+                        ...($role === 'administrative_staff' ? [[
+                            'url' => '../admin/teacher_schedules.php', 'icon' => 'bx-group', 'label' => 'Lịch của giáo viên', 'match' => ['admin/teacher_schedules.php'],
+                        ]] : []),
                     ]],
                     ['id' => 'teacher-students', 'label' => 'Theo dõi học viên', 'icon' => 'bx-group', 'items' => [
                         ['url' => '../teacher/submissions.php', 'icon' => 'bx-file-find', 'label' => 'Bài làm Học viên', 'match' => ['teacher/submissions.php']],
@@ -942,7 +958,7 @@ $unreadNotifications ??= 0;
                     <?php endif; ?>
                     <div class="user-details">
                         <div class="user-name"><?php echo htmlspecialchars($user_name); ?></div>
-                        <div class="user-role"><?php echo htmlspecialchars($role); ?></div>
+                        <div class="user-role"><?php echo htmlspecialchars($roleLabel); ?></div>
                     </div>
                 </div>
                 <div class="user-dropdown">

@@ -111,7 +111,7 @@ function redirectToRoleDashboard(string $role): void
 {
     if ($role === 'admin') {
         header('Location: admin/dashboard.php');
-    } elseif ($role === 'teacher') {
+    } elseif (in_array($role, ['teacher', 'administrative_staff'], true)) {
         header('Location: teacher/dashboard.php');
     } else {
         header('Location: student/dashboard.php');

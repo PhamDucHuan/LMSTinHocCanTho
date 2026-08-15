@@ -7,7 +7,7 @@ require_once '../includes/notifications.php';
 require_once '../includes/audit.php';
 /** @var PDO $pdo */
 
-if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_role'], ['teacher', 'admin'])) {
+if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_role'], ['teacher', 'administrative_staff', 'admin'], true)) {
     header('Location: ../index.php');
     exit;
 }
