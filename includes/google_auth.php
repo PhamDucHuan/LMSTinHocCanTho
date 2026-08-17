@@ -57,7 +57,11 @@ if (isset($_GET['code'])) {
 
     if ($user && !isAccountApproved($pdo, (int) $user['id'])) {
         recordLoginHistory($pdo, (int) $user['id'], 'login_google_failed_pending', 'google', $email, ['reason' => 'awaiting_admin_approval']);
-        $_SESSION['pending_approval'] = ['name' => (string) $user['name'], 'email' => (string) $user['email']];
+        $_SESSION['pending_approval'] = [
+            'user_id' => (int) $user['id'],
+            'name' => (string) $user['name'],
+            'email' => (string) $user['email'],
+        ];
         header('Location: ../pending_approval.php');
         exit;
     }
@@ -77,7 +81,11 @@ if (isset($_GET['code'])) {
         $insert = $pdo->prepare("INSERT INTO users (name, email, google_id, avatar_url, role, is_approved) VALUES (?, ?, ?, ?, 'student', 0)");
         $insert->execute([$name, $email, $google_id, $avatar_url]);
 
-        $_SESSION['pending_approval'] = ['name' => (string) $name, 'email' => (string) $email];
+        $_SESSION['pending_approval'] = [
+            'user_id' => (int) $pdo->lastInsertId(),
+            'name' => (string) $name,
+            'email' => (string) $email,
+        ];
         header('Location: ../pending_approval.php');
         exit;
     }

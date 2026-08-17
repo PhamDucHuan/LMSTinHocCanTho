@@ -18,6 +18,47 @@ if (!empty($_SESSION['user_id'])) {
 $pending = $_SESSION['pending_approval'] ?? [];
 $name = trim((string) ($pending['name'] ?? ''));
 $email = trim((string) ($pending['email'] ?? ''));
+$approvalCheckUnavailable = false;
+
+// Mỗi lần tải lại trang, kiểm tra xem Admin đã duyệt tài khoản hay chưa.
+// Nếu đã duyệt thì khôi phục phiên đăng nhập ngay, không bắt người dùng nhập lại mật khẩu.
+$pendingUserId = (int) ($pending['user_id'] ?? 0);
+if ($pendingUserId > 0 || $email !== '') {
+    try {
+        require_once __DIR__ . '/config/database.php';
+        require_once __DIR__ . '/includes/account_lock.php';
+
+        // SELECT * giúp trang chờ duyệt vẫn chạy nếu hosting chưa có một cột
+        // phụ như avatar_url hoặc is_locked.
+        $lookup = $pendingUserId > 0
+            ? $pdo->prepare('SELECT * FROM users WHERE id = ? LIMIT 1')
+            : $pdo->prepare('SELECT * FROM users WHERE email = ? LIMIT 1');
+        $lookup->execute([$pendingUserId > 0 ? $pendingUserId : $email]);
+        $user = $lookup->fetch(PDO::FETCH_ASSOC);
+
+        if ($user && (int) ($user['is_approved'] ?? 0) === 1 && !isAccountLocked($pdo, (int) $user['id'])) {
+            session_regenerate_id(true);
+            $_SESSION['user_id'] = (int) $user['id'];
+            $_SESSION['user_name'] = (string) ($user['name'] ?? '');
+            $_SESSION['user_role'] = (string) ($user['role'] ?? 'student');
+            $_SESSION['user_avatar'] = $user['avatar_url'] ?? null;
+            unset($_SESSION['pending_approval']);
+
+            if ($_SESSION['user_role'] === 'admin') {
+                header('Location: admin/dashboard.php');
+            } elseif (in_array($_SESSION['user_role'], ['teacher', 'administrative_staff'], true)) {
+                header('Location: teacher/dashboard.php');
+            } else {
+                header('Location: student/dashboard.php');
+            }
+            exit;
+        }
+    } catch (Throwable $error) {
+        // Không để lỗi cột/migration tạm thời biến trang chờ duyệt thành HTTP 500.
+        error_log('Pending approval status check failed: ' . $error->getMessage());
+        $approvalCheckUnavailable = true;
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="vi">
@@ -46,7 +87,7 @@ $email = trim((string) ($pending['email'] ?? ''));
                 <?php if ($email !== ''): ?><span><?php echo htmlspecialchars($email, ENT_QUOTES, 'UTF-8'); ?></span><?php endif; ?>
             </div>
         <?php endif; ?>
-        <div class="notice"><i class='bx bx-bell'></i><span>Vui lòng quay lại đăng nhập sau khi Admin thông báo tài khoản đã được duyệt.</span></div>
+        <div class="notice"><i class='bx bx-refresh'></i><span><?php echo $approvalCheckUnavailable ? 'Hệ thống đang thử kết nối lại để kiểm tra phê duyệt. Bạn có thể tải lại trang sau ít phút.' : 'Sau khi Admin duyệt, bạn chỉ cần tải lại trang này. Hệ thống sẽ tự đăng nhập cho bạn.'; ?></span></div>
         <a class="button" href="pending_approval.php?back=1"><i class='bx bx-left-arrow-alt'></i> Quay lại đăng nhập</a>
     </main>
 </body>

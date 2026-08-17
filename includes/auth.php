@@ -41,7 +41,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         $stmt = $pdo->prepare("INSERT INTO users (name, email, password_hash, role, is_approved) VALUES (?, ?, ?, ?, 0)");
         if ($stmt->execute([$name, $email, $hashed_password, $role])) {
-            $_SESSION['pending_approval'] = ['name' => $name, 'email' => $email];
+            $_SESSION['pending_approval'] = [
+                'user_id' => (int) $pdo->lastInsertId(),
+                'name' => $name,
+                'email' => $email,
+            ];
             header('Location: ../pending_approval.php');
             exit;
         } else {
@@ -73,7 +77,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($user && password_verify($password, $user['password_hash'])) {
             if (!isAccountApproved($pdo, (int) $user['id'])) {
                 recordLoginHistory($pdo, (int) $user['id'], 'login_failed_pending', 'password', $email, ['reason' => 'awaiting_admin_approval']);
-                $_SESSION['pending_approval'] = ['name' => (string) $user['name'], 'email' => (string) $user['email']];
+                $_SESSION['pending_approval'] = [
+                    'user_id' => (int) $user['id'],
+                    'name' => (string) $user['name'],
+                    'email' => (string) $user['email'],
+                ];
                 header('Location: ../pending_approval.php');
                 exit;
             }
