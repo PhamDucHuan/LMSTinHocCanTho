@@ -871,6 +871,7 @@ $unreadNotifications ??= 0;
                         ['url' => '../admin/ai_grading.php', 'icon' => 'bx-bot', 'label' => 'Giám sát chấm AI', 'match' => ['admin/ai_grading.php']],
                         ['url' => '../admin/audit_logs.php', 'icon' => 'bx-history', 'label' => 'Nhật ký hoạt động', 'match' => ['admin/audit_logs.php']],
                         ['url' => '../admin/login_logs.php', 'icon' => 'bx-log-in-circle', 'label' => 'Nhật ký đăng nhập', 'match' => ['admin/login_logs.php']],
+                        ['url' => '../admin/online_users.php', 'icon' => 'bx-radio-circle-marked', 'label' => 'Người đang online', 'match' => ['admin/online_users.php']],
                         ['url' => '../admin/tickets.php', 'icon' => 'bx-support', 'label' => 'Quản lý Hỗ trợ', 'match' => ['admin/tickets.php', 'admin/ticket_detail.php']],
                     ]],
                     ['id' => 'system', 'label' => 'Quản trị hệ thống', 'icon' => 'bx-cog', 'items' => [

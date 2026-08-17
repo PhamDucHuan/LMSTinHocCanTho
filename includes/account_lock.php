@@ -73,6 +73,7 @@ function terminateLockedAccountSession(PDO $pdo): void
     $locked = $status['locked'];
     $approved = $status['approved'];
     if (!$locked && $approved) return;
+    $pendingName = (string) ($_SESSION['user_name'] ?? '');
     try {
         $pdo->prepare('DELETE FROM user_remember_tokens WHERE user_id = ?')->execute([$userId]);
     } catch (Throwable $error) {
@@ -86,11 +87,13 @@ function terminateLockedAccountSession(PDO $pdo): void
     setcookie('lms_google_remember', '', ['expires' => time() - 3600, 'path' => '/', 'secure' => !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off', 'httponly' => true, 'samesite' => 'Lax']);
     session_destroy();
     session_start();
-    $_SESSION['error'] = $locked
-        ? 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.'
-        : 'Tài khoản đang chờ Admin duyệt. Bạn chưa thể truy cập hệ thống.';
+    if ($locked) {
+        $_SESSION['error'] = 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.';
+    } else {
+        $_SESSION['pending_approval'] = ['name' => $pendingName];
+    }
     $directory = str_replace('\\', '/', dirname((string) ($_SERVER['SCRIPT_NAME'] ?? '/')));
     if (in_array(basename($directory), ['admin', 'teacher', 'student', 'account', 'includes'], true)) $directory = dirname($directory);
-    header('Location: ' . rtrim($directory, '/') . '/index.php');
+    header('Location: ' . rtrim($directory, '/') . ($locked ? '/index.php' : '/pending_approval.php'));
     exit;
 }

@@ -1,6 +1,10 @@
 <?php
 require_once __DIR__ . '/includes/security.php';
 secureSessionStart();
+if (!empty($_SESSION['pending_approval'])) {
+    header('Location: pending_approval.php');
+    exit;
+}
 if (empty($_SESSION['user_id']) && isset($_COOKIE['lms_google_remember'])) {
     require_once __DIR__ . '/config/database.php';
     require_once __DIR__ . '/includes/remember_login.php';

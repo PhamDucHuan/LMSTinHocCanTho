@@ -2,9 +2,14 @@
 require_once __DIR__ . '/security.php';
 require_once __DIR__ . '/remember_login.php';
 secureSessionStart();
-require_once '../config/database.php';
+require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/account_lock.php';
 require_once __DIR__ . '/login_history.php';
+
+// Ensure $pdo is defined
+if (!isset($pdo)) {
+    throw new RuntimeException('Database connection failed.');
+}
 
 // Tệp xử lý đăng nhập bằng Google
 // Tính năng này đang được thiết lập mô phỏng. Bắt buộc phải có Client ID từ Google Cloud.
@@ -25,7 +30,8 @@ if (isset($_GET['code'])) {
     $client->setAccessToken($token['access_token']);
     
     // get profile info
-    $google_oauth = new Google_Service_Oauth2($client);
+    // Dùng namespace hiện hành của Google API Client để IDE/Composer nhận diện đầy đủ.
+    $google_oauth = new \Google\Service\Oauth2($client);
     $google_account_info = $google_oauth->userinfo->get();
     
     $email =  $google_account_info->email;
@@ -51,8 +57,8 @@ if (isset($_GET['code'])) {
 
     if ($user && !isAccountApproved($pdo, (int) $user['id'])) {
         recordLoginHistory($pdo, (int) $user['id'], 'login_google_failed_pending', 'google', $email, ['reason' => 'awaiting_admin_approval']);
-        $_SESSION['error'] = 'Tài khoản Google đang chờ Admin duyệt. Bạn chưa thể đăng nhập.';
-        header('Location: ../index.php');
+        $_SESSION['pending_approval'] = ['name' => (string) $user['name'], 'email' => (string) $user['email']];
+        header('Location: ../pending_approval.php');
         exit;
     }
 
@@ -71,8 +77,8 @@ if (isset($_GET['code'])) {
         $insert = $pdo->prepare("INSERT INTO users (name, email, google_id, avatar_url, role, is_approved) VALUES (?, ?, ?, ?, 'student', 0)");
         $insert->execute([$name, $email, $google_id, $avatar_url]);
 
-        $_SESSION['success'] = 'Đã ghi nhận tài khoản Google. Vui lòng chờ Admin duyệt trước khi đăng nhập.';
-        header('Location: ../index.php');
+        $_SESSION['pending_approval'] = ['name' => (string) $name, 'email' => (string) $email];
+        header('Location: ../pending_approval.php');
         exit;
     }
     

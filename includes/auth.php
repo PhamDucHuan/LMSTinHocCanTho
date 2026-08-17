@@ -1,7 +1,7 @@
 <?php
 require_once __DIR__ . '/security.php';
 secureSessionStart();
-require_once '../config/database.php';
+require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/account_lock.php';
 require_once __DIR__ . '/audit.php';
 require_once __DIR__ . '/login_history.php';
@@ -41,8 +41,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         $stmt = $pdo->prepare("INSERT INTO users (name, email, password_hash, role, is_approved) VALUES (?, ?, ?, ?, 0)");
         if ($stmt->execute([$name, $email, $hashed_password, $role])) {
-            $_SESSION['success'] = 'Đăng ký thành công! Tài khoản đang chờ Admin duyệt và sẽ có quyền Học viên sau khi được duyệt.';
-            header('Location: ../index.php');
+            $_SESSION['pending_approval'] = ['name' => $name, 'email' => $email];
+            header('Location: ../pending_approval.php');
             exit;
         } else {
             $_SESSION['error'] = 'Đăng ký thất bại. Vui lòng thử lại sau.';
@@ -70,14 +70,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
 
-        if ($user && !isAccountApproved($pdo, (int) $user['id'])) {
-            recordLoginHistory($pdo, (int) $user['id'], 'login_failed_pending', 'password', $email, ['reason' => 'awaiting_admin_approval']);
-            $_SESSION['error'] = 'Tài khoản đang chờ Admin duyệt. Bạn chưa thể đăng nhập.';
-            header('Location: ../index.php');
-            exit;
-        }
-
         if ($user && password_verify($password, $user['password_hash'])) {
+            if (!isAccountApproved($pdo, (int) $user['id'])) {
+                recordLoginHistory($pdo, (int) $user['id'], 'login_failed_pending', 'password', $email, ['reason' => 'awaiting_admin_approval']);
+                $_SESSION['pending_approval'] = ['name' => (string) $user['name'], 'email' => (string) $user['email']];
+                header('Location: ../pending_approval.php');
+                exit;
+            }
             session_regenerate_id(true);
             $_SESSION['user_id'] = $user['id'];
             $_SESSION['user_name'] = $user['name'];
