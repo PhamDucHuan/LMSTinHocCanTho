@@ -1,0 +1,8 @@
+{
+    "php.validate.executablePath": "D:\\XAMPP\\php\\php.exe",
+    "intelephense.environment.phpVersion": "8.2.0",
+    "intelephense.files.exclude": [
+        "**/node_modules/**",
+        "**/vendor/**"
+    ]
+}

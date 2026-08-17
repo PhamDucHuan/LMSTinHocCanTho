@@ -66,10 +66,14 @@ function readQuizXlsxRows(string $path): array
             if (@$workbook->loadXML($workbookXml) && @$relationships->loadXML($relationshipsXml)) {
                 $workbookXpath = new DOMXPath($workbook);
                 $firstSheet = $workbookXpath->query('//*[local-name()="sheet"]')->item(0);
-                $relationshipId = $firstSheet?->getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id');
+                // DOMXPath::item() khai báo kiểu DOMNode, nhưng thuộc tính r:id chỉ có ở DOMElement.
+                $relationshipId = $firstSheet instanceof DOMElement
+                    ? $firstSheet->getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id')
+                    : '';
                 if ($relationshipId) {
                     $relationshipXpath = new DOMXPath($relationships);
                     foreach ($relationshipXpath->query('//*[local-name()="Relationship"]') as $relationship) {
+                        if (!$relationship instanceof DOMElement) continue;
                         if ($relationship->getAttribute('Id') === $relationshipId) {
                             $target = str_replace('\\', '/', $relationship->getAttribute('Target'));
                             $sheetPath = str_starts_with($target, '/') ? ltrim($target, '/') : 'xl/' . ltrim($target, '/');
@@ -100,6 +104,7 @@ function readQuizXlsxRows(string $path): array
             if (@$relationships->loadXML($sheetRelationshipXml)) {
                 $relationshipXpath = new DOMXPath($relationships);
                 foreach ($relationshipXpath->query('//*[local-name()="Relationship"]') as $relationship) {
+                    if (!$relationship instanceof DOMElement) continue;
                     if (!str_ends_with($relationship->getAttribute('Type'), '/drawing')) continue;
                     $drawingPath = $normaliseZipPath(dirname($sheetPath), $relationship->getAttribute('Target'));
                     $drawingXml = $zip->getFromName($drawingPath);
@@ -112,6 +117,7 @@ function readQuizXlsxRows(string $path): array
                     if (@$drawingRelDocument->loadXML($drawingRelationshipXml)) {
                         $drawingRelXpath = new DOMXPath($drawingRelDocument);
                         foreach ($drawingRelXpath->query('//*[local-name()="Relationship"]') as $drawingRelationship) {
+                            if (!$drawingRelationship instanceof DOMElement) continue;
                             $drawingRelationships[$drawingRelationship->getAttribute('Id')] =
                                 $normaliseZipPath(dirname($drawingPath), $drawingRelationship->getAttribute('Target'));
                         }
@@ -124,7 +130,7 @@ function readQuizXlsxRows(string $path): array
                         $columnNode = $from ? $drawingXpath->query('./*[local-name()="col"]', $from)->item(0) : null;
                         $rowNode = $from ? $drawingXpath->query('./*[local-name()="row"]', $from)->item(0) : null;
                         $blip = $drawingXpath->query('.//*[local-name()="blip"]', $anchor)->item(0);
-                        if (!$columnNode || !$rowNode || !$blip) continue;
+                        if (!$columnNode || !$rowNode || !$blip instanceof DOMElement) continue;
                         $relationshipId = $blip->getAttributeNS(
                             'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
                             'embed'
@@ -154,9 +160,11 @@ function readQuizXlsxRows(string $path): array
         $xpath = new DOMXPath($document);
         $rows = [];
         foreach ($xpath->query('//*[local-name()="sheetData"]/*[local-name()="row"]') as $rowNode) {
+            if (!$rowNode instanceof DOMElement) continue;
             $row = array_fill(0, 8, '');
             $excelRow = (int) ($rowNode->getAttribute('r') ?: count($rows) + 1);
             foreach ($xpath->query('./*[local-name()="c"]', $rowNode) as $cell) {
+                if (!$cell instanceof DOMElement) continue;
                 $reference = strtoupper($cell->getAttribute('r'));
                 if (!preg_match('/^([A-Z]+)/', $reference, $match)) continue;
                 $column = 0;
@@ -181,6 +189,19 @@ function readQuizXlsxRows(string $path): array
             }
             if (isset($cellImages[$excelRow])) {
                 $row['__images'] = $cellImages[$excelRow];
+            }
+
+            // Một số file Excel giữ sẵn định dạng hoặc bảng dữ liệu đến hàng trăm dòng
+            // dù các hàng đó không có nội dung. Không xem chúng là câu hỏi rỗng.
+            $hasTextValue = false;
+            foreach (array_slice($row, 0, 8) as $value) {
+                if (trim((string) $value) !== '') {
+                    $hasTextValue = true;
+                    break;
+                }
+            }
+            if (!$hasTextValue && empty($cellImages[$excelRow])) {
+                continue;
             }
             $rows[] = $row;
         }
