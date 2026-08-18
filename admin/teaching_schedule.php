@@ -43,7 +43,7 @@ function teachingClassStudentNames(string $value): array
     return array_values(array_unique(array_filter($names, static fn(string $name): bool => $name !== '')));
 }
 
-function appendPlannedSlots(PDO $pdo, int $classId, int $userId): void
+function appendPlannedSlots(PDO $pdo, int $classId, int $userId, ?string $notBeforeDate = null): void
 {
     $configStmt = $pdo->prepare('SELECT total_sessions, planned_weekdays, planned_start_date, planned_start_time, planned_end_time FROM teaching_classes WHERE id=?');
     $configStmt->execute([$classId]);
@@ -58,7 +58,13 @@ function appendPlannedSlots(PDO $pdo, int $classId, int $userId): void
     $lastStmt = $pdo->prepare('SELECT MAX(teaching_date) FROM teaching_schedule_slots WHERE teaching_class_id=?');
     $lastStmt->execute([$classId]);
     $lastDate = $lastStmt->fetchColumn();
-    $cursor = new DateTimeImmutable($lastDate ? $lastDate . ' +1 day' : $config['planned_start_date']);
+    // Khi vừa xóa buổi cuối, MAX() sẽ lùi về buổi trước đó. Lấy thêm ngày vừa
+    // xóa làm mốc để buổi bù được tạo ở phía sau, không tự xuất hiện lại đúng ô đó.
+    $anchorDate = $lastDate ?: $config['planned_start_date'];
+    if ($notBeforeDate !== null && preg_match('/^\d{4}-\d{2}-\d{2}$/', $notBeforeDate) && $notBeforeDate > $anchorDate) {
+        $anchorDate = $notBeforeDate;
+    }
+    $cursor = new DateTimeImmutable($lastDate ? $anchorDate . ' +1 day' : $anchorDate);
     $insert = $pdo->prepare('INSERT INTO teaching_schedule_slots (teaching_class_id, teaching_date, start_time, end_time, is_makeup, created_by) VALUES (?, ?, ?, ?, 0, ?)');
     for ($guard = 0; $remaining > 0 && $guard < 3660; $guard++, $cursor = $cursor->modify('+1 day')) {
         if (in_array((int) $cursor->format('N'), $days, true)) {
@@ -68,7 +74,7 @@ function appendPlannedSlots(PDO $pdo, int $classId, int $userId): void
     }
 }
 
-function rebalancePlannedSchedule(PDO $pdo, int $classId, int $userId, bool $addedMakeup = false): void
+function rebalancePlannedSchedule(PDO $pdo, int $classId, int $userId, bool $addedMakeup = false, ?string $notBeforeDate = null): void
 {
     $configStmt = $pdo->prepare('SELECT total_sessions FROM teaching_classes WHERE id=?');
     $configStmt->execute([$classId]);
@@ -84,7 +90,7 @@ function rebalancePlannedSchedule(PDO $pdo, int $classId, int $userId, bool $add
             if ($slotId > 0) $pdo->prepare('DELETE FROM teaching_schedule_slots WHERE id=?')->execute([$slotId]);
         }
     }
-    appendPlannedSlots($pdo, $classId, $userId);
+    appendPlannedSlots($pdo, $classId, $userId, $notBeforeDate);
 }
 
 function scheduleResponse(array $payload, int $status = 200): never
@@ -162,11 +168,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && str_contains((string) ($_SERVER['CO
         }
         if ($action === 'delete_slot') {
             $slotId = (int) ($payload['slot_id'] ?? 0);
-            $stmt = $pdo->prepare('DELETE FROM teaching_schedule_slots WHERE id=? AND teaching_class_id=?');
-            $stmt->execute([$slotId, $classId]);
-            rebalancePlannedSchedule($pdo, $classId, (int) $_SESSION['user_id']);
+            if ($slotId <= 0) throw new RuntimeException('Buổi dạy không hợp lệ.');
+
+            $pdo->beginTransaction();
+            try {
+                $slotLookup = $pdo->prepare('SELECT teaching_date FROM teaching_schedule_slots WHERE id=? AND teaching_class_id=? FOR UPDATE');
+                $slotLookup->execute([$slotId, $classId]);
+                $deletedDate = $slotLookup->fetchColumn();
+                if ($deletedDate === false) throw new RuntimeException('Không tìm thấy buổi dạy hoặc buổi đã được xóa.');
+
+                $stmt = $pdo->prepare('DELETE FROM teaching_schedule_slots WHERE id=? AND teaching_class_id=?');
+                $stmt->execute([$slotId, $classId]);
+                if ($stmt->rowCount() !== 1) throw new RuntimeException('Không thể xóa buổi dạy. Vui lòng thử lại.');
+
+                rebalancePlannedSchedule($pdo, $classId, (int) $_SESSION['user_id'], false, (string) $deletedDate);
+                $pdo->commit();
+            } catch (Throwable $error) {
+                if ($pdo->inTransaction()) $pdo->rollBack();
+                throw $error;
+            }
             writeAuditLog($pdo, 'teaching_schedule.slot_deleted', 'teaching_schedule_slot', $slotId, ['class_id' => $classId]);
-            scheduleResponse(['ok' => true]);
+            scheduleResponse(['ok' => true, 'message' => 'Đã xóa buổi. Nếu lớp có lịch tự tạo, một buổi bù sẽ được xếp sau buổi cuối.']);
         }
         throw new RuntimeException('Thao tác không hợp lệ.');
     } catch (Throwable $error) {
