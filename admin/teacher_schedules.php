@@ -106,7 +106,7 @@ require_once '../includes/header.php';
 .month-bar{display:flex;justify-content:space-between;align-items:flex-end;gap:14px;flex-wrap:wrap;margin-bottom:18px}.month-heading h2{margin:0}.month-heading .schedule-note{margin-top:6px}.schedule-tools{display:flex;align-items:flex-end;gap:9px;flex-wrap:wrap}.teacher-filter{display:flex;align-items:flex-end;gap:9px;flex-wrap:wrap}.teacher-filter label{display:grid;gap:6px;margin:0;color:var(--text-muted);font-size:12px;font-weight:700}.teacher-filter label:first-child{min-width:270px}.teacher-filter select{box-sizing:border-box;height:58px;min-height:58px;padding:11px 13px;border:1px solid var(--border-color)!important;border-radius:12px;background:var(--input-bg)!important;color:var(--text-main)!important;font-size:14px}.month-control{display:flex;align-items:center;gap:9px;box-sizing:border-box;height:58px;padding:4px 6px 4px 12px;border:1px solid var(--border-color);border-radius:12px;background:rgba(8,20,40,.55)}.month-control input[type="month"]{box-sizing:border-box;width:170px!important;height:48px;min-height:48px;padding:8px 10px;border:1px solid transparent!important;border-radius:8px;background:transparent!important;color:var(--text-main)!important;font:700 14px inherit;cursor:pointer}.month-control .btn{height:48px;min-height:48px}.month-control input[type="month"]:focus{outline:none;border-color:var(--primary)!important;background:rgba(255,255,255,.04)!important}.month-control input[type="month"]::-webkit-calendar-picker-indicator{filter:invert(1);opacity:.9;cursor:pointer}.month-nav{display:flex;align-items:stretch;gap:6px}.month-nav .btn{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;height:58px;min-width:50px;padding-inline:12px;margin:0}
 .month-control input[type="date"]{box-sizing:border-box;width:170px!important;height:48px;min-height:48px;padding:8px 10px;border:1px solid transparent!important;border-radius:8px;background:transparent!important;color:var(--text-main)!important;font:700 14px inherit;cursor:pointer}.month-control input[type="date"]:focus{outline:none;border-color:var(--primary)!important;background:rgba(255,255,255,.04)!important}.month-control input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(1);opacity:.9;cursor:pointer}
 .calendar-wrap{width:100%;height:auto;max-height:66vh;overflow-x:auto;overflow-y:auto;scrollbar-gutter:stable;overscroll-behavior:contain;border:1px solid var(--border-color);border-radius:16px;background:var(--glass-bg)}.calendar-wrap.table-responsive .schedule-table{margin-top:0}.schedule-table{border-collapse:separate;border-spacing:0;width:100%;min-width:0;table-layout:fixed;font-size:12px}.schedule-table th{position:sticky;top:0;z-index:4;min-width:0;padding:8px 6px;background:#1f517e;color:#fff;text-align:center;border-right:1px solid rgba(255,255,255,.18);border-bottom:1px solid rgba(255,255,255,.2)}.schedule-table th.weekend{background:#3d3d3d}.schedule-table th.info-head{left:0;z-index:7;width:240px;min-width:240px;box-shadow:5px 0 10px rgba(0,0,0,.16)}.schedule-table td{min-width:0;height:48px;padding:4px;border-right:1px solid var(--border-color);border-bottom:1px solid var(--border-color);vertical-align:top;background:rgba(255,255,255,.012)}.schedule-table td.weekend{background:rgba(0,0,0,.2)}.schedule-table th.today{box-shadow:inset 0 -3px 0 var(--primary)}.schedule-table td.today{background:rgba(var(--primary-rgb),.08)}.schedule-table td.class-info{position:sticky;left:0;z-index:3;width:240px;min-width:240px;max-width:240px;padding:7px 10px;background:var(--sidebar-bg);box-shadow:5px 0 10px rgba(0,0,0,.16)}.class-info strong{display:block;font-size:14px}.class-info small{display:block;margin-top:2px;color:var(--text-muted);font-size:12px;line-height:1.3}.class-note{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.schedule-slot{display:block;width:100%;box-sizing:border-box;padding:4px 6px;margin:1px 0;border-radius:7px;background:#b6e5d0;color:#12352a;font-weight:800;font-size:11px;text-align:center}.empty-view{padding:34px!important;text-align:center;color:var(--text-muted)}
-.shift-label{padding:8px 14px!important;height:auto!important;font-weight:800;font-size:13px;letter-spacing:.5px;background:var(--shift-color,#2563eb)!important;color:#fff!important;border-bottom:2px solid color-mix(in srgb,var(--shift-color) 80%,#000)!important;text-align:left!important}
+.shift-label{position:sticky;top:52px;z-index:3;padding:8px 14px!important;height:auto!important;font-weight:800;font-size:13px;letter-spacing:.5px;background:var(--shift-color,#2563eb)!important;color:#fff!important;border-bottom:2px solid color-mix(in srgb,var(--shift-color) 80%,#000)!important;text-align:left!important}
 .shift-zone.shift-morning td{background:rgba(37,99,235,.04)}.shift-zone.shift-morning td.class-info{background:color-mix(in srgb,var(--sidebar-bg) 96%,#2563eb)}
 .shift-zone.shift-afternoon td{background:rgba(234,88,12,.04)}.shift-zone.shift-afternoon td.class-info{background:color-mix(in srgb,var(--sidebar-bg) 96%,#ea580c)}
 .shift-zone.shift-evening td{background:rgba(124,58,237,.04)}.shift-zone.shift-evening td.class-info{background:color-mix(in srgb,var(--sidebar-bg) 96%,#7c3aed)}
@@ -168,5 +168,39 @@ $teacherShiftColors = ['morning' => '#2563eb', 'afternoon' => '#ea580c', 'evenin
 document.getElementById('teacher-schedule-select')?.addEventListener('change', function () {
     document.getElementById('teacher-schedule-filter')?.submit();
 });
+</script>
+<style>
+/* Keep the two schedule levels visible while the calendar body scrolls. */
+.calendar-wrap{position:relative}
+.calendar-wrap .schedule-table thead,.calendar-wrap .schedule-table .shift-label{position:static!important}
+</style>
+<style>.schedule-sticky-layers{position:sticky;top:0;z-index:100;height:0;overflow:visible;pointer-events:none}.schedule-sticky-head,.schedule-sticky-shift{position:absolute;left:0;overflow:hidden}.schedule-sticky-head{top:0;height:70px;background:#1f517e}.schedule-sticky-head table{border-collapse:separate;border-spacing:0}.schedule-sticky-head th{height:70px!important;box-sizing:border-box;background:#1f517e!important}.schedule-sticky-shift{display:flex;align-items:center;box-sizing:border-box;padding:8px 14px;font-weight:800;font-size:13px;letter-spacing:.5px;color:#fff;box-shadow:0 3px 8px rgba(0,0,0,.28)}</style>
+<script>
+(() => {
+  document.querySelectorAll('.calendar-wrap').forEach((wrap) => {
+    const table = wrap.querySelector('.schedule-table');
+    if (!table?.tHead) return;
+    const layer = document.createElement('div'); layer.className = 'schedule-sticky-layers';
+    const head = document.createElement('div'); head.className = 'schedule-sticky-head';
+    const headTable = table.cloneNode(false), cols = document.createElement('colgroup');
+    [...table.tHead.rows[0].cells].forEach((cell) => { const col = document.createElement('col'); col.style.width = cell.getBoundingClientRect().width + 'px'; cols.append(col); });
+    headTable.append(cols, table.tHead.cloneNode(true)); head.append(headTable);
+    const shift = document.createElement('div'); shift.className = 'schedule-sticky-shift';
+    layer.append(head, shift); wrap.prepend(layer);
+    const update = () => {
+      const width = table.getBoundingClientRect().width, x = wrap.scrollLeft;
+      head.style.width = width + 'px'; head.style.transform = `translateX(${-x}px)`;
+      headTable.style.width = width + 'px';
+      const headerHeight = 70;
+      const headers = [...table.querySelectorAll('tbody .shift-header')];
+      const active = headers.filter((row) => row.offsetTop <= wrap.scrollTop + headerHeight + 1).pop() || headers[0];
+      const label = active?.querySelector('.shift-label');
+      if (!label) { shift.hidden = true; return; }
+      shift.hidden = false; shift.textContent = label.textContent.trim(); shift.style.background = getComputedStyle(label).backgroundColor;
+      shift.style.top = headerHeight + 'px'; shift.style.width = width + 'px'; shift.style.transform = `translateX(${-x}px)`;
+    };
+    wrap.addEventListener('scroll', update, {passive:true}); window.addEventListener('resize', update); update();
+  });
+})();
 </script>
 <?php require_once '../includes/footer.php'; ?>

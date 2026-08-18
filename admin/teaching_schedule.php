@@ -449,7 +449,7 @@ require_once '../includes/header.php';
 <dialog class="schedule-dialog create-class-dialog" id="create-class-dialog"><form class="schedule-form" method="post"><?php echo csrfField(); ?><input type="hidden" name="action" value="create_class"><input type="hidden" name="month" value="<?php echo htmlspecialchars($month); ?>"><h2 class="dialog-title">Tạo lớp mới</h2><label>Tên lớp<input required name="class_name" maxlength="191" placeholder="Ví dụ: TH.2603.06"></label><?php if ($isAdmin): ?><label>Giáo viên phụ trách<select name="teacher_id"><option value="">Chưa phân công</option><?php foreach ($teachers as $teacher): ?><option value="<?php echo (int) $teacher['id']; ?>"><?php echo htmlspecialchars($teacher['name']); ?></option><?php endforeach; ?></select></label><?php endif; ?><fieldset class="shift-fieldset"><legend>Ca học</legend><div class="shift-options"><label class="shift-option shift-option-morning"><input type="radio" name="time_shift" value="morning" checked><span class="shift-icon">🌅</span><div><strong>Ca sáng</strong><small>8h – 11h</small></div></label><label class="shift-option shift-option-afternoon"><input type="radio" name="time_shift" value="afternoon"><span class="shift-icon">☀️</span><div><strong>Ca chiều</strong><small>14h – 17h</small></div></label><label class="shift-option shift-option-evening"><input type="radio" name="time_shift" value="evening"><span class="shift-icon">🌙</span><div><strong>Ca tối</strong><small>18h – 21h</small></div></label></div></fieldset><label>Học viên trong lớp<textarea name="student_names" placeholder="Mỗi dòng một học viên"></textarea></label><label>Ghi chú lớp<textarea name="notes" placeholder="Ví dụ: Học tối thứ 2, 4, 6 · Phòng T357 · Khai giảng 20/08"></textarea></label><div class="dialog-actions"><button type="button" class="btn btn-outline" id="close-create-class">Hủy</button><button class="btn btn-primary"><i class='bx bx-save'></i> Tạo lớp</button></div></form></dialog>
 <style>.create-class-dialog input:not([type="checkbox"]):not([type="radio"]),.create-class-dialog select,.create-class-dialog textarea{box-sizing:border-box;background:var(--input-bg,#101c31)!important;color:var(--text-main)!important;border:1px solid var(--border-color)!important;border-radius:10px!important}.create-class-dialog input:not([type="checkbox"]):not([type="radio"]),.create-class-dialog select{min-height:48px;padding:11px 14px}.create-class-dialog input[name="total_sessions"]{max-width:180px}.create-class-dialog fieldset{display:grid;gap:10px;margin:0;border:1px solid var(--border-color);border-radius:12px;padding:14px}.create-class-dialog legend{padding:0 5px;font-weight:800}.create-class-dialog textarea[name="student_names"],.create-class-dialog textarea[name="notes"]{min-height:75px!important;height:75px}.weekday-label{font-weight:700}.weekday-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.weekday-options .weekday-option{display:flex!important;align-items:center;gap:8px;margin:0!important;padding:8px 10px;border:1px solid var(--border-color);border-radius:9px;font-weight:600!important;cursor:pointer}.weekday-options .weekday-option input{width:auto!important;margin:0!important;accent-color:var(--primary)}.weekday-options .weekday-option span{white-space:nowrap}.lesson-shift-select{grid-column:span 2}.lesson-shift-select small{margin-top:4px;color:var(--text-muted);font-weight:400;line-height:1.35}@media(max-width:520px){.weekday-options{grid-template-columns:repeat(2,minmax(0,1fr))}.lesson-shift-select{grid-column:auto}}
 .shift-fieldset{border:1px solid var(--border-color)!important;border-radius:14px!important;padding:16px!important}.shift-options{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.shift-option{display:flex!important;align-items:center;gap:10px;padding:12px 14px!important;border:2px solid var(--border-color);border-radius:12px;cursor:pointer;transition:all .2s;margin:0!important;font-weight:400!important}.shift-option:hover{border-color:rgba(var(--primary-rgb),.5);background:rgba(var(--primary-rgb),.04)}.shift-option input[type="radio"]{width:auto!important;margin:0!important;accent-color:var(--primary)}.shift-option input[type="radio"]:checked ~ *{opacity:1}.shift-option:has(input:checked){border-color:var(--primary);background:rgba(var(--primary-rgb),.08);box-shadow:0 0 0 1px rgba(var(--primary-rgb),.2)}.shift-icon{font-size:22px;line-height:1}.shift-option div{display:grid;gap:2px}.shift-option strong{font-size:13px;line-height:1.2}.shift-option small{color:var(--text-muted);font-size:11px}
-.shift-label{padding:8px 14px!important;height:auto!important;font-weight:800;font-size:13px;letter-spacing:.5px;background:var(--shift-color,#2563eb)!important;color:#fff!important;border-bottom:2px solid color-mix(in srgb,var(--shift-color) 80%,#000)!important;text-align:left!important}
+.shift-label{position:sticky;top:52px;z-index:3;padding:8px 14px!important;height:auto!important;font-weight:800;font-size:13px;letter-spacing:.5px;background:var(--shift-color,#2563eb)!important;color:#fff!important;border-bottom:2px solid color-mix(in srgb,var(--shift-color) 80%,#000)!important;text-align:left!important}
 .shift-zone.shift-morning td{background:rgba(37,99,235,.04)}.shift-zone.shift-morning td.info-cell{background:color-mix(in srgb,var(--sidebar-bg) 96%,#2563eb)}
 .shift-zone.shift-afternoon td{background:rgba(234,88,12,.04)}.shift-zone.shift-afternoon td.info-cell{background:color-mix(in srgb,var(--sidebar-bg) 96%,#ea580c)}
 .shift-zone.shift-evening td{background:rgba(124,58,237,.04)}.shift-zone.shift-evening td.info-cell{background:color-mix(in srgb,var(--sidebar-bg) 96%,#7c3aed)}
@@ -818,6 +818,40 @@ document.addEventListener('click', (event) => {
       location.reload();
     } catch (error) { alert(error.message); }
   }, true);
+})();
+</script>
+<style>
+/* Keep the two schedule levels visible while the calendar body scrolls. */
+.calendar-wrap{position:relative}
+.calendar-wrap .schedule-table thead,.calendar-wrap .schedule-table .shift-label{position:static!important}
+</style>
+<style>.schedule-sticky-layers{position:sticky;top:0;z-index:100;height:0;overflow:visible;pointer-events:none}.schedule-sticky-head,.schedule-sticky-shift{position:absolute;left:0;overflow:hidden}.schedule-sticky-head{top:0;height:70px;background:#1f517e}.schedule-sticky-head table{border-collapse:separate;border-spacing:0}.schedule-sticky-head th{height:70px!important;box-sizing:border-box;background:#1f517e!important}.schedule-sticky-shift{display:flex;align-items:center;box-sizing:border-box;padding:8px 14px;font-weight:800;font-size:13px;letter-spacing:.5px;color:#fff;box-shadow:0 3px 8px rgba(0,0,0,.28)}</style>
+<script>
+(() => {
+  document.querySelectorAll('.calendar-wrap').forEach((wrap) => {
+    const table = wrap.querySelector('.schedule-table');
+    if (!table?.tHead) return;
+    const layer = document.createElement('div'); layer.className = 'schedule-sticky-layers';
+    const head = document.createElement('div'); head.className = 'schedule-sticky-head';
+    const headTable = table.cloneNode(false), cols = document.createElement('colgroup');
+    [...table.tHead.rows[0].cells].forEach((cell) => { const col = document.createElement('col'); col.style.width = cell.getBoundingClientRect().width + 'px'; cols.append(col); });
+    headTable.append(cols, table.tHead.cloneNode(true)); head.append(headTable);
+    const shift = document.createElement('div'); shift.className = 'schedule-sticky-shift';
+    layer.append(head, shift); wrap.prepend(layer);
+    const update = () => {
+      const width = table.getBoundingClientRect().width, x = wrap.scrollLeft;
+      head.style.width = width + 'px'; head.style.transform = `translateX(${-x}px)`;
+      headTable.style.width = width + 'px';
+      const headerHeight = 70;
+      const headers = [...table.querySelectorAll('tbody .shift-header')];
+      const active = headers.filter((row) => row.offsetTop <= wrap.scrollTop + headerHeight + 1).pop() || headers[0];
+      const label = active?.querySelector('.shift-label');
+      if (!label) { shift.hidden = true; return; }
+      shift.hidden = false; shift.textContent = label.textContent.trim(); shift.style.background = getComputedStyle(label).backgroundColor;
+      shift.style.top = headerHeight + 'px'; shift.style.width = width + 'px'; shift.style.transform = `translateX(${-x}px)`;
+    };
+    wrap.addEventListener('scroll', update, {passive:true}); window.addEventListener('resize', update); update();
+  });
 })();
 </script>
 <?php require_once '../includes/footer.php'; ?>
