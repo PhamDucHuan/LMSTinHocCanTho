@@ -61,7 +61,7 @@ $slots = [];
 $totalSessions = 0;
 if ($teacherId > 0) {
     $classStmt = $pdo->prepare(
-        "SELECT tc.id, tc.class_name, tc.notes, tc.status, c.title AS course_title,
+        "SELECT tc.id, tc.class_name, tc.notes, tc.status, tc.time_shift, c.title AS course_title,
                 GROUP_CONCAT(tcs.student_name ORDER BY tcs.student_name SEPARATOR ', ') AS students,
                 COUNT(DISTINCT tcs.id) AS student_count
          FROM teaching_classes tc
@@ -71,8 +71,8 @@ if ($teacherId > 0) {
              SELECT 1 FROM teaching_schedule_slots substitute_slot
              WHERE substitute_slot.teaching_class_id=tc.id AND substitute_slot.substitute_teacher_id=?
          ))
-         GROUP BY tc.id, tc.class_name, tc.notes, tc.status, c.title, tc.sort_order
-         ORDER BY tc.sort_order, tc.id"
+         GROUP BY tc.id, tc.class_name, tc.notes, tc.status, tc.time_shift, c.title, tc.sort_order
+         ORDER BY FIELD(tc.time_shift, 'morning', 'afternoon', 'evening'), tc.sort_order, tc.id"
     );
     $classStmt->execute([$teacherId, $teacherId]);
     $classes = $classStmt->fetchAll(PDO::FETCH_ASSOC);
@@ -106,6 +106,11 @@ require_once '../includes/header.php';
 .month-bar{display:flex;justify-content:space-between;align-items:flex-end;gap:14px;flex-wrap:wrap;margin-bottom:18px}.month-heading h2{margin:0}.month-heading .schedule-note{margin-top:6px}.schedule-tools{display:flex;align-items:flex-end;gap:9px;flex-wrap:wrap}.teacher-filter{display:flex;align-items:flex-end;gap:9px;flex-wrap:wrap}.teacher-filter label{display:grid;gap:6px;margin:0;color:var(--text-muted);font-size:12px;font-weight:700}.teacher-filter label:first-child{min-width:270px}.teacher-filter select{box-sizing:border-box;height:58px;min-height:58px;padding:11px 13px;border:1px solid var(--border-color)!important;border-radius:12px;background:var(--input-bg)!important;color:var(--text-main)!important;font-size:14px}.month-control{display:flex;align-items:center;gap:9px;box-sizing:border-box;height:58px;padding:4px 6px 4px 12px;border:1px solid var(--border-color);border-radius:12px;background:rgba(8,20,40,.55)}.month-control input[type="month"]{box-sizing:border-box;width:170px!important;height:48px;min-height:48px;padding:8px 10px;border:1px solid transparent!important;border-radius:8px;background:transparent!important;color:var(--text-main)!important;font:700 14px inherit;cursor:pointer}.month-control .btn{height:48px;min-height:48px}.month-control input[type="month"]:focus{outline:none;border-color:var(--primary)!important;background:rgba(255,255,255,.04)!important}.month-control input[type="month"]::-webkit-calendar-picker-indicator{filter:invert(1);opacity:.9;cursor:pointer}.month-nav{display:flex;align-items:stretch;gap:6px}.month-nav .btn{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;height:58px;min-width:50px;padding-inline:12px;margin:0}
 .month-control input[type="date"]{box-sizing:border-box;width:170px!important;height:48px;min-height:48px;padding:8px 10px;border:1px solid transparent!important;border-radius:8px;background:transparent!important;color:var(--text-main)!important;font:700 14px inherit;cursor:pointer}.month-control input[type="date"]:focus{outline:none;border-color:var(--primary)!important;background:rgba(255,255,255,.04)!important}.month-control input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(1);opacity:.9;cursor:pointer}
 .calendar-wrap{width:100%;height:auto;max-height:66vh;overflow-x:auto;overflow-y:auto;scrollbar-gutter:stable;overscroll-behavior:contain;border:1px solid var(--border-color);border-radius:16px;background:var(--glass-bg)}.calendar-wrap.table-responsive .schedule-table{margin-top:0}.schedule-table{border-collapse:separate;border-spacing:0;width:100%;min-width:0;table-layout:fixed;font-size:12px}.schedule-table th{position:sticky;top:0;z-index:4;min-width:0;padding:8px 6px;background:#1f517e;color:#fff;text-align:center;border-right:1px solid rgba(255,255,255,.18);border-bottom:1px solid rgba(255,255,255,.2)}.schedule-table th.weekend{background:#3d3d3d}.schedule-table th.info-head{left:0;z-index:7;width:240px;min-width:240px;box-shadow:5px 0 10px rgba(0,0,0,.16)}.schedule-table td{min-width:0;height:48px;padding:4px;border-right:1px solid var(--border-color);border-bottom:1px solid var(--border-color);vertical-align:top;background:rgba(255,255,255,.012)}.schedule-table td.weekend{background:rgba(0,0,0,.2)}.schedule-table th.today{box-shadow:inset 0 -3px 0 var(--primary)}.schedule-table td.today{background:rgba(var(--primary-rgb),.08)}.schedule-table td.class-info{position:sticky;left:0;z-index:3;width:240px;min-width:240px;max-width:240px;padding:7px 10px;background:var(--sidebar-bg);box-shadow:5px 0 10px rgba(0,0,0,.16)}.class-info strong{display:block;font-size:14px}.class-info small{display:block;margin-top:2px;color:var(--text-muted);font-size:12px;line-height:1.3}.class-note{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.schedule-slot{display:block;width:100%;box-sizing:border-box;padding:4px 6px;margin:1px 0;border-radius:7px;background:#b6e5d0;color:#12352a;font-weight:800;font-size:11px;text-align:center}.empty-view{padding:34px!important;text-align:center;color:var(--text-muted)}
+.shift-label{padding:8px 14px!important;height:auto!important;font-weight:800;font-size:13px;letter-spacing:.5px;background:var(--shift-color,#2563eb)!important;color:#fff!important;border-bottom:2px solid color-mix(in srgb,var(--shift-color) 80%,#000)!important;text-align:left!important}
+.shift-zone.shift-morning td{background:rgba(37,99,235,.04)}.shift-zone.shift-morning td.class-info{background:color-mix(in srgb,var(--sidebar-bg) 96%,#2563eb)}
+.shift-zone.shift-afternoon td{background:rgba(234,88,12,.04)}.shift-zone.shift-afternoon td.class-info{background:color-mix(in srgb,var(--sidebar-bg) 96%,#ea580c)}
+.shift-zone.shift-evening td{background:rgba(124,58,237,.04)}.shift-zone.shift-evening td.class-info{background:color-mix(in srgb,var(--sidebar-bg) 96%,#7c3aed)}
+.shift-empty{padding:18px 14px!important;text-align:center!important;color:var(--text-muted)!important;font-style:italic;height:auto!important;background:rgba(255,255,255,.02)!important}
 @media(max-width:900px){.schedule-card{padding:17px}.schedule-tools,.teacher-filter{width:100%}.teacher-filter label:first-child{min-width:100%;width:100%}.teacher-filter select{width:100%}.calendar-wrap{max-height:62vh}.schedule-table{width:940px;min-width:940px}.schedule-table th.info-head,.schedule-table td.class-info{width:210px;min-width:210px;max-width:210px}}
 </style>
 <main class="teacher-schedule-page">
@@ -135,10 +140,24 @@ require_once '../includes/header.php';
         </div>
         <div class="calendar-wrap table-responsive"><table class="schedule-table">
             <thead><tr><th class="info-head">LỚP / HỌC VIÊN</th><?php foreach ($days as $day): $weekend=(int)$day->format('N')>=6; $isToday=$day->format('Y-m-d')===$today; ?><th class="<?php echo trim(($weekend ? 'weekend ' : '') . ($isToday ? 'today' : '')); ?>"><small><?php echo ['T2','T3','T4','T5','T6','T7','CN'][(int)$day->format('N')-1]; ?></small><br><?php echo $day->format('d'); ?></th><?php endforeach; ?></tr></thead>
+<?php
+$teacherShiftGroups = ['morning' => [], 'afternoon' => [], 'evening' => []];
+foreach ($classes as $class) {
+    $shift = $class['time_shift'] ?? 'morning';
+    if (!isset($teacherShiftGroups[$shift])) $shift = 'morning';
+    $teacherShiftGroups[$shift][] = $class;
+}
+$teacherShiftLabels = ['morning' => '🌅 BUỔI SÁNG', 'afternoon' => '☀️ BUỔI CHIỀU', 'evening' => '🌙 BUỔI TỐI'];
+$teacherShiftColors = ['morning' => '#2563eb', 'afternoon' => '#ea580c', 'evening' => '#7c3aed'];
+?>
             <tbody>
-            <?php foreach ($classes as $class): $className=(string)($class['course_title'] ?: $class['class_name']); ?>
-                <tr><td class="class-info"><strong><?php echo htmlspecialchars($className); ?></strong><small><?php echo (int)$class['student_count']; ?> học viên</small><small><?php echo htmlspecialchars($class['students'] ?: 'Chưa nhập học viên'); ?></small><?php if (!empty($class['notes'])): ?><small class="class-note" title="<?php echo htmlspecialchars($class['notes'], ENT_QUOTES); ?>"><?php echo htmlspecialchars($class['notes']); ?></small><?php endif; ?></td>
+            <?php foreach ($teacherShiftGroups as $shiftKey => $shiftClasses): ?>
+                <tr class="shift-header shift-<?php echo $shiftKey; ?>"><td colspan="<?php echo count($days)+1; ?>" class="shift-label" style="--shift-color:<?php echo $teacherShiftColors[$shiftKey]; ?>"><?php echo $teacherShiftLabels[$shiftKey]; ?></td></tr>
+                <?php if (empty($shiftClasses)): ?><tr class="shift-zone shift-<?php echo $shiftKey; ?>"><td colspan="<?php echo count($days)+1; ?>" class="shift-empty">Chưa có lớp nào trong ca này</td></tr><?php endif; ?>
+                <?php foreach ($shiftClasses as $class): $className=(string)($class['course_title'] ?: $class['class_name']); ?>
+                <tr class="shift-zone shift-<?php echo $shiftKey; ?>"><td class="class-info"><strong><?php echo htmlspecialchars($className); ?></strong><small><?php echo (int)$class['student_count']; ?> học viên</small><small><?php echo htmlspecialchars($class['students'] ?: 'Chưa nhập học viên'); ?></small><?php if (!empty($class['notes'])): ?><small class="class-note" title="<?php echo htmlspecialchars($class['notes'], ENT_QUOTES); ?>"><?php echo htmlspecialchars($class['notes']); ?></small><?php endif; ?></td>
                 <?php foreach ($days as $day): $date=$day->format('Y-m-d'); $weekend=(int)$day->format('N')>=6; $isToday=$date===$today; ?><td class="<?php echo trim(($weekend ? 'weekend ' : '') . ($isToday ? 'today' : '')); ?>"><?php foreach ($slots[(int)$class['id']][$date] ?? [] as $slot): ?><span class="schedule-slot"><?php echo substr((string)$slot['start_time'],0,5); ?> – <?php echo substr((string)$slot['end_time'],0,5); ?></span><?php endforeach; ?></td><?php endforeach; ?></tr>
+            <?php endforeach; ?>
             <?php endforeach; ?>
             <?php if (!$classes): ?><tr><td class="empty-view" colspan="<?php echo count($days)+1; ?>">Giáo viên này chưa có lớp đang hoạt động.</td></tr><?php endif; ?>
             </tbody>
