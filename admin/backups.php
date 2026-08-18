@@ -1,6 +1,14 @@
 <?php
 declare(strict_types=1);
-require_once '../includes/security.php';secureSessionStart();requireRole(['admin']);require_once '../config/database.php';require_once '../includes/backup_manager.php';require_once '../includes/drive_inventory.php';require_once '../includes/audit.php';
+require_once '../config/database.php';
+require_once '../includes/security.php';
+secureSessionStart();
+requireRole(['admin']);
+require_once '../includes/backup_manager.php';
+require_once '../includes/drive_inventory.php';
+require_once '../includes/audit.php';
+
+if(!isset($pdo)){throw new RuntimeException('Database connection not initialized.');}
 $adminPasswordStmt=$pdo->prepare('SELECT password_hash FROM users WHERE id=?');$adminPasswordStmt->execute([(int)$_SESSION['user_id']]);$adminHasPassword=!empty($adminPasswordStmt->fetchColumn());
 $backups=listBackups();$assetBackups=listLocalFileBackups();$latest=$backups[0]['created_at']??null;$warning=!$latest||$latest<time()-172800;
 if(isset($_GET['download'])){$path=safeBackupPath((string)$_GET['download']);if(!$path){http_response_code(404);exit('Không tìm thấy bản sao lưu.');}header('Content-Type: application/octet-stream');header('Content-Disposition: attachment; filename="'.basename($path).'"');header('Content-Length: '.filesize($path));readfile($path);exit;}

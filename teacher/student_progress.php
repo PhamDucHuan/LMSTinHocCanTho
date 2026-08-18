@@ -9,6 +9,8 @@ if (empty($_SESSION['user_id']) || !in_array($_SESSION['user_role'] ?? '', ['tea
     exit;
 }
 
+$courseFilter = filter_input(INPUT_GET, 'course_id', FILTER_VALIDATE_INT);
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'set_exam_date') {
     $cId = filter_input(INPUT_POST, 'course_id', FILTER_VALIDATE_INT);
     $sId = filter_input(INPUT_POST, 'student_id', FILTER_VALIDATE_INT);

@@ -3,6 +3,7 @@ require_once '../includes/security.php';
 require_once '../includes/authorization.php';
 secureSessionStart();
 require_once '../config/database.php';
+global $pdo;
 
 header('Content-Type: application/json; charset=utf-8');
 set_time_limit(120);

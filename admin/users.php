@@ -2,6 +2,7 @@
 require_once '../includes/security.php';
 secureSessionStart();
 require_once '../config/database.php';
+$pdo = createDatabaseConnectionWithRetry();
 require_once '../includes/audit.php';
 require_once '../includes/account_lock.php';
 

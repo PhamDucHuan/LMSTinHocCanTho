@@ -24,6 +24,7 @@ if (!$assignment_id) {
 }
 
 try {
+    $pdo = createDatabaseConnection();
     $assignment = authorizationFindAccessibleAssignment($pdo, (int) $assignment_id, (string) ($_SESSION['user_role'] ?? ''), (int) $_SESSION['user_id']);
     
     if (!$assignment) {

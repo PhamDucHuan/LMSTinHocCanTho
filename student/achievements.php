@@ -4,6 +4,10 @@ secureSessionStart();
 requireRole(['student']);
 require_once '../config/database.php';
 
+if (!isset($pdo)) {
+    die('Database connection failed');
+}
+
 $studentId = (int) $_SESSION['user_id'];
 
 $submissionStmt = $pdo->prepare(
