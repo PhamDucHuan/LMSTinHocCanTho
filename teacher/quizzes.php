@@ -69,22 +69,68 @@ $saveUploadedQuizImage = static function (array $file) use ($saveQuizImage): ?st
     if (!isset($extensions[$mime])) throw new RuntimeException('Ảnh chỉ được dùng PNG, JPG, GIF hoặc WEBP.');
     return $saveQuizImage(file_get_contents($file['tmp_name']), $extensions[$mime]);
 };
+$cleanQuizCategory = static function ($value): string {
+    $category = preg_replace('/\s+/u', ' ', trim((string) $value)) ?: '';
+    if ($category === '') return 'Chưa phân loại';
+    return mb_substr($category, 0, 100, 'UTF-8');
+};
+$requireQuizCategory = static function ($value) use ($pdo, $cleanQuizCategory): string {
+    $category = $cleanQuizCategory($value);
+    $stmt = $pdo->prepare('SELECT name FROM quiz_categories WHERE name=? LIMIT 1');
+    $stmt->execute([$category]);
+    $storedName = $stmt->fetchColumn();
+    if ($storedName === false) throw new RuntimeException('Danh mục trắc nghiệm không hợp lệ. Vui lòng tạo danh mục trước.');
+    return (string) $storedName;
+};
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verifyCsrfToken();
     $action = $_POST['action'] ?? '';
     try {
+        if ($action === 'create_quiz_category') {
+            $categoryName = preg_replace('/\s+/u', ' ', trim((string) ($_POST['category_name'] ?? ''))) ?: '';
+            if ($categoryName === '') throw new RuntimeException('Vui lòng nhập tên danh mục.');
+            $categoryName = mb_substr($categoryName, 0, 100, 'UTF-8');
+            $exists = $pdo->prepare('SELECT id FROM quiz_categories WHERE name=? LIMIT 1');
+            $exists->execute([$categoryName]);
+            if ($exists->fetchColumn()) throw new RuntimeException('Danh mục này đã tồn tại.');
+            $nextOrder = (int) $pdo->query('SELECT COALESCE(MAX(sort_order),0)+1 FROM quiz_categories')->fetchColumn();
+            $stmt = $pdo->prepare('INSERT INTO quiz_categories (name, sort_order, created_by) VALUES (?, ?, ?)');
+            $stmt->execute([$categoryName, $nextOrder, (int) $_SESSION['user_id']]);
+            writeAuditLog($pdo, 'quiz_category.created', 'quiz_category', (int) $pdo->lastInsertId(), ['name' => $categoryName]);
+            $_SESSION['success'] = 'Đã tạo danh mục “' . $categoryName . '”.';
+            $redirect($courseId, $quizId ?: null);
+        }
+
+        if ($action === 'delete_quiz_category') {
+            $categoryId = filter_input(INPUT_POST, 'category_id', FILTER_VALIDATE_INT);
+            $categoryStmt = $pdo->prepare('SELECT id,name FROM quiz_categories WHERE id=?');
+            $categoryStmt->execute([$categoryId]);
+            $categoryRow = $categoryStmt->fetch();
+            if (!$categoryRow) throw new RuntimeException('Danh mục không tồn tại.');
+            $usageStmt = $pdo->prepare('SELECT COUNT(*) FROM quizzes WHERE category=?');
+            $usageStmt->execute([$categoryRow['name']]);
+            if ((int) $usageStmt->fetchColumn() > 0) {
+                throw new RuntimeException('Danh mục đang có bài trắc nghiệm nên chưa thể xóa. Hãy chuyển các bài sang danh mục khác trước.');
+            }
+            $pdo->prepare('DELETE FROM quiz_categories WHERE id=?')->execute([$categoryId]);
+            writeAuditLog($pdo, 'quiz_category.deleted', 'quiz_category', (int) $categoryId, ['name' => $categoryRow['name']]);
+            $_SESSION['success'] = 'Đã xóa danh mục “' . $categoryRow['name'] . '”.';
+            $redirect($courseId, $quizId ?: null);
+        }
+
         if ($action === 'create_quiz') {
             $title = trim((string) ($_POST['title'] ?? ''));
             if ($title === '') throw new RuntimeException('Vui lòng nhập tên bài trắc nghiệm.');
+            $category = $requireQuizCategory($_POST['category'] ?? '');
             $duration = max(1, min(600, (int) ($_POST['duration_minutes'] ?? 40)));
             $orderStmt = $pdo->prepare('SELECT COALESCE(MAX(sort_order),0)+1 FROM quizzes WHERE course_id=?');
             $orderStmt->execute([$courseId]);
             $stmt = $pdo->prepare(
                 'INSERT INTO quizzes
                  (course_id, teacher_id, title, slug, description, duration_minutes, max_attempts,
-                  question_limit, shuffle_questions, shuffle_options, is_published, sort_order)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)'
+                  category, question_limit, shuffle_questions, shuffle_options, is_published, sort_order)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)'
             );
             $stmt->execute([
                 $courseId,
@@ -94,6 +140,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 trim((string) ($_POST['description'] ?? '')),
                 $duration,
                 max(0, min(100, (int) ($_POST['max_attempts'] ?? 0))),
+                $category,
                 max(0, min(1000, (int) ($_POST['question_limit'] ?? 0))),
                 isset($_POST['shuffle_questions']) ? 1 : 0,
                 isset($_POST['shuffle_options']) ? 1 : 0,
@@ -174,11 +221,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($action === 'update_quiz') {
             $title = trim((string) ($_POST['title'] ?? ''));
             if ($title === '') throw new RuntimeException('Tên bài trắc nghiệm không được để trống.');
+            $category = $requireQuizCategory($_POST['category'] ?? '');
             $availableFrom = trim((string) ($_POST['available_from'] ?? ''));
             $availableUntil = trim((string) ($_POST['available_until'] ?? ''));
             $stmt = $pdo->prepare(
                 'UPDATE quizzes
-                 SET title=?, description=?, duration_minutes=?, max_attempts=?, question_limit=?,
+                 SET title=?, description=?, category=?, duration_minutes=?, max_attempts=?, question_limit=?,
                      shuffle_questions=?, shuffle_options=?, available_from=?, available_until=?, is_published=?,
                      passing_score=?, require_fullscreen=?, limit_device=?
                  WHERE id=?'
@@ -186,6 +234,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->execute([
                 $title,
                 trim((string) ($_POST['description'] ?? '')),
+                $category,
                 max(1, min(600, (int) ($_POST['duration_minutes'] ?? 40))),
                 max(0, min(100, (int) ($_POST['max_attempts'] ?? 0))),
                 max(0, min(1000, (int) ($_POST['question_limit'] ?? 0))),
@@ -315,6 +364,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $quizListStmt = $pdo->prepare('SELECT q.*, COUNT(DISTINCT s.id) section_count, COUNT(qq.id) question_count FROM quizzes q LEFT JOIN quiz_sections s ON s.quiz_id=q.id LEFT JOIN quiz_questions qq ON qq.section_id=s.id WHERE q.course_id=? GROUP BY q.id ORDER BY q.sort_order,q.id');
 $quizListStmt->execute([$courseId]);
 $quizzes = $quizListStmt->fetchAll();
+$quizCategoryRows = $pdo->query(
+    "SELECT qc.id,qc.name,qc.sort_order,COUNT(q.id) AS quiz_count
+     FROM quiz_categories qc
+     LEFT JOIN quizzes q ON q.category=qc.name
+     GROUP BY qc.id,qc.name,qc.sort_order
+     ORDER BY qc.sort_order,qc.name"
+)->fetchAll();
+$quizCategories = array_column($quizCategoryRows, 'name');
 $quiz = null;
 $sections = [];
 $attempts = [];
@@ -380,12 +437,41 @@ require_once '../includes/header.php';
 .quiz-toggle input[type="checkbox"]:checked::before{transform:translateX(20px);background:#fff}
 .quiz-toggle-grid{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:4px;padding:14px;border:1px solid var(--border-color);border-radius:12px;background:rgba(15,23,42,.35)}
 .quiz-toggle-grid .quiz-toggle{min-height:34px;margin:0!important}
+.quiz-category-manager{margin:18px 0 22px}.quiz-category-manager-head{display:flex;align-items:center;justify-content:space-between;gap:15px;flex-wrap:wrap}.quiz-category-create{display:flex;align-items:end;gap:10px;flex-wrap:wrap}.quiz-category-create .form-group{display:grid;gap:8px;min-width:min(360px,100%);margin:0}.quiz-category-create label{color:var(--text-main);font-size:14px;font-weight:600}.quiz-category-create input{width:100%;min-height:46px;padding:11px 14px;border:1px solid rgba(148,163,184,.22);border-radius:11px;background:rgba(15,23,42,.72);color:var(--text-main);font:inherit;outline:none}.quiz-category-create input:focus{border-color:var(--primary);box-shadow:0 0 0 4px rgba(var(--primary-rgb),.14)}.quiz-category-chips{display:flex;gap:9px;flex-wrap:wrap;margin-top:16px}.quiz-category-chip{display:flex;align-items:center;gap:8px;padding:8px 9px 8px 13px;border:1px solid var(--border-color);border-radius:999px;background:rgba(15,23,42,.45)}.quiz-category-chip strong{font-size:14px}.quiz-category-chip span{color:var(--text-muted);font-size:12px}.quiz-category-chip form{margin:0}.quiz-category-chip button{width:28px;height:28px;padding:0;border:0;border-radius:50%;display:grid;place-items:center;background:rgba(244,63,94,.12);color:var(--danger);cursor:pointer}.quiz-category-chip button:disabled{opacity:.35;cursor:not-allowed}
 @media(max-width:850px){.quiz-layout{grid-template-columns:1fr}.answer-grid{grid-template-columns:1fr}.quiz-toggle-grid{grid-template-columns:1fr}}
 </style>
 <a href="course_detail.php?id=<?php echo $courseId; ?>" style="color:var(--primary)"><i class='bx bx-arrow-back'></i> Quay lại khóa học</a>
 <h1><i class='bx bx-list-check'></i> Trắc nghiệm — <?php echo htmlspecialchars($course['title']); ?></h1>
 <?php if(isset($_SESSION['success'])):?><div class="box" style="padding:14px;margin-bottom:14px;color:var(--success)"><?php echo htmlspecialchars($_SESSION['success']);unset($_SESSION['success']);?></div><?php endif;?>
 <?php if(isset($_SESSION['error'])):?><div class="box" style="padding:14px;margin-bottom:14px;color:var(--danger)"><?php echo htmlspecialchars($_SESSION['error']);unset($_SESSION['error']);?></div><?php endif;?>
+<section class="box quiz-category-manager">
+    <div class="quiz-category-manager-head">
+        <div>
+            <h2 style="margin:0 0 6px"><i class='bx bx-category-alt'></i> Quản lý danh mục trắc nghiệm</h2>
+            <div style="color:var(--text-muted)">Tạo danh mục trước, sau đó chọn danh mục khi tạo hoặc chỉnh sửa bài.</div>
+        </div>
+        <form method="post" class="quiz-category-create">
+            <?php echo csrfField(); ?>
+            <input type="hidden" name="action" value="create_quiz_category"><input type="hidden" name="course_id" value="<?php echo $courseId;?>"><input type="hidden" name="quiz_id" value="<?php echo (int)$quizId;?>">
+            <div class="form-group"><label for="new-quiz-category">Tên danh mục mới</label><input id="new-quiz-category" name="category_name" maxlength="100" placeholder="Ví dụ: ĐHCT, ĐHTV" required></div>
+            <button class="btn btn-primary"><i class='bx bx-plus'></i> Tạo danh mục</button>
+        </form>
+    </div>
+    <div class="quiz-category-chips">
+        <?php foreach($quizCategoryRows as $categoryRow):?>
+            <div class="quiz-category-chip">
+                <strong><?php echo htmlspecialchars($categoryRow['name']);?></strong>
+                <span><?php echo (int)$categoryRow['quiz_count'];?> bài</span>
+                <form method="post" onsubmit="return confirm('Xóa danh mục này?')">
+                    <?php echo csrfField(); ?>
+                    <input type="hidden" name="action" value="delete_quiz_category"><input type="hidden" name="course_id" value="<?php echo $courseId;?>"><input type="hidden" name="quiz_id" value="<?php echo (int)$quizId;?>"><input type="hidden" name="category_id" value="<?php echo (int)$categoryRow['id'];?>">
+                    <button title="<?php echo (int)$categoryRow['quiz_count'] > 0 ? 'Danh mục đang được sử dụng' : 'Xóa danh mục';?>" <?php echo (int)$categoryRow['quiz_count'] > 0 ? 'disabled' : '';?>><i class='bx bx-x'></i></button>
+                </form>
+            </div>
+        <?php endforeach;?>
+        <?php if(!$quizCategoryRows):?><span style="color:var(--text-muted)">Chưa có danh mục. Hãy tạo danh mục đầu tiên.</span><?php endif;?>
+    </div>
+</section>
 <div class="quiz-layout">
     <aside class="box">
         <h3 style="margin-top:0">Tạo bài trắc nghiệm mới</h3>
@@ -393,6 +479,7 @@ require_once '../includes/header.php';
             <?php echo csrfField(); ?>
             <input type="hidden" name="action" value="create_quiz"><input type="hidden" name="course_id" value="<?php echo $courseId;?>">
             <div class="form-group"><label>Tên bài</label><input name="title" required></div>
+            <div class="form-group"><label>Danh mục trắc nghiệm</label><select name="category" required><option value="">— Chọn danh mục —</option><?php foreach($quizCategories as $categoryOption):?><option value="<?php echo htmlspecialchars($categoryOption);?>"><?php echo htmlspecialchars($categoryOption);?></option><?php endforeach;?></select></div>
             <div class="form-group"><label>Mô tả</label><textarea name="description"></textarea></div>
             <div class="form-group"><label>Thời gian (phút)</label><input type="number" name="duration_minutes" value="40" min="1" max="600"></div>
             <div class="form-group"><label>Số lượt làm tối đa (0 = không giới hạn)</label><input type="number" name="max_attempts" value="0" min="0" max="100"></div>
@@ -410,7 +497,7 @@ require_once '../includes/header.php';
                     <button type="button" class="quiz-drag-handle" draggable="true" title="Giữ và kéo để đổi thứ tự" aria-label="Kéo để đổi thứ tự"><i class='bx bx-grid-vertical'></i></button>
                     <a class="quiz-list-link" href="?course_id=<?php echo $courseId;?>&quiz_id=<?php echo (int)$item['id'];?>">
                         <strong><span class="quiz-order-number"><?php echo $listIndex+1;?></span>. <?php echo htmlspecialchars($item['title']);?></strong>
-                        <div class="quiz-meta"><?php echo (int)$item['question_count'];?> câu · <?php echo $item['is_published']?'Đã mở':'Bản nháp';?></div>
+                        <div class="quiz-meta"><?php echo htmlspecialchars((string)($item['category'] ?? 'Chưa phân loại'));?> · <?php echo (int)$item['question_count'];?> câu · <?php echo $item['is_published']?'Đã mở':'Bản nháp';?></div>
                     </a>
                     <div class="quiz-list-actions">
                         <a class="btn btn-outline" href="?course_id=<?php echo $courseId;?>&quiz_id=<?php echo (int)$item['id'];?>" title="Sửa"><i class='bx bx-edit'></i></a>
@@ -431,6 +518,7 @@ require_once '../includes/header.php';
                 <?php echo csrfField(); ?>
                 <input type="hidden" name="action" value="update_quiz"><input type="hidden" name="course_id" value="<?php echo $courseId;?>"><input type="hidden" name="quiz_id" value="<?php echo $quizId;?>">
                 <div class="form-group"><label>Tên bài trắc nghiệm</label><input name="title" value="<?php echo htmlspecialchars($quiz['title']);?>" required></div>
+                <div class="form-group"><label>Danh mục trắc nghiệm</label><select name="category" required><?php foreach($quizCategories as $categoryOption):?><option value="<?php echo htmlspecialchars($categoryOption);?>" <?php echo (string)($quiz['category'] ?? '')===(string)$categoryOption?'selected':'';?>><?php echo htmlspecialchars($categoryOption);?></option><?php endforeach;?></select></div>
                 <div class="form-group"><label>Mô tả</label><textarea name="description"><?php echo htmlspecialchars($quiz['description']??'');?></textarea></div>
                 <div class="answer-grid">
                     <div class="form-group"><label>Thời gian (phút)</label><input type="number" name="duration_minutes" value="<?php echo (int)$quiz['duration_minutes'];?>" min="1" max="600"></div>

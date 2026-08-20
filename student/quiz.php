@@ -163,7 +163,7 @@ require_once '../includes/header.php';
 .quiz-confirm-overlay{position:fixed;inset:0;z-index:2100;display:grid;place-items:center;padding:18px;background:rgba(2,6,23,.62);backdrop-filter:blur(3px)}.quiz-confirm-overlay[hidden]{display:none}.quiz-confirm-dialog{width:min(390px,100%);padding:24px;border:1px solid var(--border-color);border-radius:16px;background:var(--sidebar-bg);box-shadow:0 25px 70px rgba(0,0,0,.42);text-align:center}.quiz-confirm-icon{width:54px;height:54px;margin:0 auto 13px;border-radius:50%;display:grid;place-items:center;background:rgba(245,158,11,.15);color:#fbbf24;font-size:30px}.quiz-confirm-actions{display:flex;justify-content:center;gap:10px;margin-top:20px}
 @media(max-width:650px){.quiz-options{grid-template-columns:1fr}.quiz-top .btn{width:100%}}
 </style>
-<a href="<?php echo htmlspecialchars(friendlyUrl('quizzes.php','course',$quiz['course_slug']));?>" style="color:var(--primary)"><i class='bx bx-arrow-back'></i> Danh sách trắc nghiệm</a>
+<a href="quizzes.php?course_id=<?php echo (int)$quiz['course_id'];?>&amp;category=<?php echo rawurlencode((string)($quiz['category'] ?? 'Chưa phân loại'));?>" style="color:var(--primary)"><i class='bx bx-arrow-back'></i> Danh sách trắc nghiệm</a>
 <h1><?php echo htmlspecialchars($quiz['title']);?></h1>
 <?php if(!$attempt['submitted_at']):?><div id="quiz-integrity-status" class="box" style="padding:10px 14px;margin-bottom:14px;color:var(--text-muted);font-size:13px"><i class='bx bx-cloud-upload'></i> Đáp án được tự động lưu. Hệ thống đang ghi nhận trạng thái làm bài.</div><?php endif;?>
 <?php if($attempt['submitted_at']):?>

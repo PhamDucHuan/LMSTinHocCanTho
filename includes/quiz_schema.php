@@ -12,6 +12,15 @@ function ensureQuizSchema(PDO $pdo): void
     $userKeyType = $columnType('users', 'id');
 
     $statements = [
+        "CREATE TABLE IF NOT EXISTS quiz_categories (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(100) NOT NULL,
+            sort_order INT UNSIGNED NOT NULL DEFAULT 0,
+            created_by INT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_quiz_categories_name (name),
+            KEY idx_quiz_categories_order (sort_order, name)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
         "CREATE TABLE IF NOT EXISTS quizzes (
             id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             course_id {$courseKeyType} NOT NULL,
@@ -19,6 +28,7 @@ function ensureQuizSchema(PDO $pdo): void
             title VARCHAR(255) NOT NULL,
             slug VARCHAR(191) NULL UNIQUE,
             description TEXT NULL,
+            category VARCHAR(100) NOT NULL DEFAULT 'Chưa phân loại',
             duration_minutes INT UNSIGNED NOT NULL DEFAULT 40,
             is_published TINYINT(1) NOT NULL DEFAULT 1,
             sort_order INT UNSIGNED NOT NULL DEFAULT 0,
