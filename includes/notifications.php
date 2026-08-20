@@ -44,7 +44,8 @@ function sendSystemEmail(string $to, string $subject, string $htmlBody): bool
     $password = getenv('MAIL_PASSWORD');
     $encryption = getenv('MAIL_ENCRYPTION') ?: 'tls';
     $fromAddress = getenv('MAIL_FROM_ADDRESS') ?: 'no-reply@lmstinhoccantho.com';
-    $fromName = getenv('MAIL_FROM_NAME') ?: 'LMS Admin';
+    // Tên hiển thị/chữ ký thống nhất của mọi email hệ thống.
+    $fromName = getenv('MAIL_FROM_NAME') ?: 'Tin Học';
 
     // Nếu đã có cấu hình SMTP (Username & Password) thì dùng PHPMailer
     if (!empty($host) && !empty($username) && !empty($password)) {

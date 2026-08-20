@@ -47,7 +47,8 @@ function get_email_layout(string $content): string {
             </tr>
             <tr>
                 <td class="footer">
-                    <p>Đây là email được gửi tự động từ Hệ thống Quản lý Học tập LMS.<br>Vui lòng không trả lời email này.</p>
+                    <p>Trân trọng,<br><strong>Tin Học</strong></p>
+                    <p style="margin-top:8px;">Đây là email được gửi tự động từ Hệ thống Quản lý Học tập LMS.<br>Vui lòng không trả lời email này.</p>
                 </td>
             </tr>
         </table>
