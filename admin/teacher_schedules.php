@@ -173,37 +173,55 @@ document.getElementById('teacher-schedule-select')?.addEventListener('change', f
 });
 </script>
 <style>
-/* Keep the two schedule levels visible while the calendar body scrolls. */
-.calendar-wrap{position:relative}
-.calendar-wrap .schedule-table thead,.calendar-wrap .schedule-table .shift-label{position:static!important}
+/* Cố định thứ/ngày và thanh ca hiện tại. Thanh ca dùng sticky gốc của bảng nên tự nhường chỗ khi sang ca kế tiếp. */
+.calendar-wrap{position:relative;--schedule-header-height:70px}
+.calendar-wrap .schedule-table th,
+.calendar-wrap .schedule-table th.info-head{position:static}
+.calendar-wrap .schedule-table .shift-label{position:sticky;top:var(--schedule-header-height);z-index:12;box-shadow:0 2px 6px rgba(0,0,0,.24)}
+.calendar-wrap .schedule-table th{height:var(--schedule-header-height);box-sizing:border-box}
+.calendar-wrap .schedule-table td.class-info{z-index:4}
+.schedule-sticky-head{position:sticky;top:0;left:0;z-index:20;height:0;overflow:visible;pointer-events:none}
+.schedule-sticky-head__content{position:absolute;top:0;left:0;height:var(--schedule-header-height);overflow:hidden;background:#1f517e}
+.schedule-sticky-head__content table{border-collapse:separate;border-spacing:0;table-layout:fixed}
+.schedule-sticky-head__content th{height:var(--schedule-header-height)!important;box-sizing:border-box;background:#1f517e!important}
+.schedule-sticky-head__content th.weekend{background:#3d3d3d!important}
+.schedule-sticky-head__content th.today{box-shadow:inset 0 -3px 0 var(--primary)}
 </style>
-<style>.schedule-sticky-layers{position:sticky;top:0;z-index:100;height:0;overflow:visible;pointer-events:none}.schedule-sticky-head,.schedule-sticky-shift{position:absolute;left:0;overflow:hidden}.schedule-sticky-head{top:0;height:70px;background:#1f517e}.schedule-sticky-head table{border-collapse:separate;border-spacing:0}.schedule-sticky-head th{height:70px!important;box-sizing:border-box;background:#1f517e!important}.schedule-sticky-shift{display:flex;align-items:center;box-sizing:border-box;padding:8px 14px;font-weight:800;font-size:13px;letter-spacing:.5px;color:#fff;box-shadow:0 3px 8px rgba(0,0,0,.28)}</style>
 <script>
 (() => {
-  document.querySelectorAll('.calendar-wrap').forEach((wrap) => {
-    const table = wrap.querySelector('.schedule-table');
-    if (!table?.tHead) return;
-    const layer = document.createElement('div'); layer.className = 'schedule-sticky-layers';
-    const head = document.createElement('div'); head.className = 'schedule-sticky-head';
-    const headTable = table.cloneNode(false), cols = document.createElement('colgroup');
-    [...table.tHead.rows[0].cells].forEach((cell) => { const col = document.createElement('col'); col.style.width = cell.getBoundingClientRect().width + 'px'; cols.append(col); });
-    headTable.append(cols, table.tHead.cloneNode(true)); head.append(headTable);
-    const shift = document.createElement('div'); shift.className = 'schedule-sticky-shift';
-    layer.append(head, shift); wrap.prepend(layer);
-    const update = () => {
-      const width = table.getBoundingClientRect().width, x = wrap.scrollLeft;
-      head.style.width = width + 'px'; head.style.transform = `translateX(${-x}px)`;
-      headTable.style.width = width + 'px';
-      const headerHeight = 70;
-      const headers = [...table.querySelectorAll('tbody .shift-header')];
-      const active = headers.filter((row) => row.offsetTop <= wrap.scrollTop + headerHeight + 1).pop() || headers[0];
-      const label = active?.querySelector('.shift-label');
-      if (!label) { shift.hidden = true; return; }
-      shift.hidden = false; shift.textContent = label.textContent.trim(); shift.style.background = getComputedStyle(label).backgroundColor;
-      shift.style.top = headerHeight + 'px'; shift.style.width = width + 'px'; shift.style.transform = `translateX(${-x}px)`;
-    };
-    wrap.addEventListener('scroll', update, {passive:true}); window.addEventListener('resize', update); update();
-  });
+    document.querySelectorAll('.calendar-wrap').forEach((wrap) => {
+        const table = wrap.querySelector('.schedule-table');
+        if (!table || !table.tHead || wrap.querySelector('.schedule-sticky-head')) return;
+
+        const sticky = document.createElement('div');
+        sticky.className = 'schedule-sticky-head';
+        const content = document.createElement('div');
+        content.className = 'schedule-sticky-head__content';
+        const cloneTable = table.cloneNode(false);
+        const colgroup = document.createElement('colgroup');
+        cloneTable.appendChild(colgroup);
+        cloneTable.appendChild(table.tHead.cloneNode(true));
+        content.appendChild(cloneTable);
+        sticky.appendChild(content);
+        wrap.prepend(sticky);
+
+        const syncHeader = () => {
+            const cells = Array.from(table.tHead.rows[0].cells);
+            colgroup.replaceChildren(...cells.map((cell) => {
+                const col = document.createElement('col');
+                col.style.width = `${cell.getBoundingClientRect().width}px`;
+                return col;
+            }));
+            const width = table.getBoundingClientRect().width;
+            cloneTable.style.width = `${width}px`;
+            content.style.width = `${width}px`;
+            content.style.transform = `translateX(${-wrap.scrollLeft}px)`;
+        };
+
+        wrap.addEventListener('scroll', syncHeader, { passive: true });
+        window.addEventListener('resize', syncHeader);
+        syncHeader();
+    });
 })();
 </script>
 <?php require_once '../includes/footer.php'; ?>

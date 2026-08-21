@@ -438,7 +438,7 @@ require_once '../includes/header.php';
 <?php if (!empty($_SESSION['success'])): ?><div class="alert alert-success"><?php echo htmlspecialchars($_SESSION['success']); unset($_SESSION['success']); ?></div><?php endif; ?>
 <?php if (!empty($_SESSION['error'])): ?><div class="alert alert-error"><?php echo htmlspecialchars($_SESSION['error']); unset($_SESSION['error']); ?></div><?php endif; ?>
 <div class="schedule-layout">
-  <section class="schedule-card"><div class="month-bar"><div><h2 style="margin:0"><i class='bx bx-table'></i> Lịch dạy tháng <?php echo $firstDay->format('m/Y'); ?></h2><p class="schedule-note" style="margin-top:6px">Nhấn ô trống để thêm buổi; nhấn giờ học để chỉnh sửa hoặc xóa.</p></div><form class="month-control" method="get"><input type="month" name="month" value="<?php echo htmlspecialchars($month); ?>"><button class="btn btn-outline">Xem lịch</button></form></div><div class="calendar-wrap"><table class="schedule-table"><thead><tr><th class="info-head">LỚP / HỌC VIÊN</th><?php foreach ($days as $day): $weekend=(int)$day->format('N')>=6; ?><th class="<?php echo $weekend ? 'weekend' : ''; ?>"><small><?php echo ['T2','T3','T4','T5','T6','T7','CN'][(int)$day->format('N')-1]; ?></small><br><?php echo $day->format('d'); ?></th><?php endforeach; ?></tr></thead><tbody><?php foreach ($shiftGroups as $shiftKey => $shiftClasses): ?><tr class="shift-header shift-<?php echo $shiftKey; ?>"><td colspan="<?php echo count($days)+1; ?>" class="shift-label" style="--shift-color:<?php echo $shiftColors[$shiftKey]; ?>"><?php echo $shiftLabels[$shiftKey]; ?></td></tr><?php if (empty($shiftClasses)): ?><tr class="shift-zone shift-<?php echo $shiftKey; ?>"><td colspan="<?php echo count($days)+1; ?>" class="shift-empty">Chưa có lớp nào trong ca này</td></tr><?php endif; ?><?php foreach ($shiftClasses as $class): $displayName = (string) ($class['course_title'] ?: $class['class_name']); ?><tr class="shift-zone shift-<?php echo $shiftKey; ?>"><td class="info-cell"><div class="class-head"><div class="class-title"><?php echo htmlspecialchars($displayName); ?></div></div><div class="class-meta"><?php echo htmlspecialchars($class['teacher_name'] ?: 'Chưa phân công giáo viên'); ?> · <?php echo (int)$class['student_count']; ?> học viên</div><div class="class-meta"><?php echo htmlspecialchars($class['students'] ?: 'Chưa nhập học viên'); ?></div></td><?php foreach ($days as $day): $date=$day->format('Y-m-d'); $cellSlots=$slots[(int)$class['id']][$date]??[]; $weekend=(int)$day->format('N')>=6; ?><td class="schedule-cell <?php echo $weekend ? 'weekend' : ''; ?>" data-class-id="<?php echo (int)$class['id']; ?>" data-class-name="<?php echo htmlspecialchars($displayName, ENT_QUOTES); ?>" data-date="<?php echo $date; ?>"><?php foreach ($cellSlots as $slot): ?><button type="button" class="slot" data-slot-id="<?php echo (int)$slot['id']; ?>" data-start="<?php echo substr($slot['start_time'],0,5); ?>" data-end="<?php echo substr($slot['end_time'],0,5); ?>"><?php echo substr($slot['start_time'],0,5); ?> – <?php echo substr($slot['end_time'],0,5); ?></button><?php endforeach; ?><span class="empty-cell">+</span></td><?php endforeach; ?></tr><?php endforeach; ?><?php endforeach; ?><?php if (!$classes): ?><tr><td colspan="<?php echo count($days)+1; ?>" style="padding:34px;text-align:center;color:var(--text-muted)">Chưa có lớp nào. Hãy tạo lớp đầu tiên bằng nút "Tạo lớp mới".</td></tr><?php endif; ?></tbody></table></div></section>
+  <section class="schedule-card"><div class="month-bar"><div><h2 style="margin:0"><i class='bx bx-table'></i> Lịch dạy tháng <?php echo $firstDay->format('m/Y'); ?></h2><p class="schedule-note" style="margin-top:6px">Nhấn ô trống để thêm buổi; nhấn giờ học để chỉnh sửa hoặc xóa.</p></div><form class="month-control" method="get"><input type="month" name="month" value="<?php echo htmlspecialchars($month); ?>"><button class="btn btn-outline">Xem lịch</button></form></div><div class="calendar-wrap"><table class="schedule-table"><thead><tr><th class="info-head">LỚP / HỌC VIÊN</th><?php foreach ($days as $day): $weekend=(int)$day->format('N')>=6; $isToday=$day->format('Y-m-d')===$todayDate; ?><th class="<?php echo trim(($weekend ? 'weekend ' : '') . ($isToday ? 'today' : '')); ?>"><small><?php echo ['T2','T3','T4','T5','T6','T7','CN'][(int)$day->format('N')-1]; ?></small><br><?php echo $day->format('d'); ?></th><?php endforeach; ?></tr></thead><tbody><?php foreach ($shiftGroups as $shiftKey => $shiftClasses): ?><tr class="shift-header shift-<?php echo $shiftKey; ?>"><td colspan="<?php echo count($days)+1; ?>" class="shift-label" style="--shift-color:<?php echo $shiftColors[$shiftKey]; ?>"><?php echo $shiftLabels[$shiftKey]; ?></td></tr><?php if (empty($shiftClasses)): ?><tr class="shift-zone shift-<?php echo $shiftKey; ?>"><td colspan="<?php echo count($days)+1; ?>" class="shift-empty">Chưa có lớp nào trong ca này</td></tr><?php endif; ?><?php foreach ($shiftClasses as $class): $displayName = (string) ($class['course_title'] ?: $class['class_name']); ?><tr class="shift-zone shift-<?php echo $shiftKey; ?>"><td class="info-cell"><div class="class-head"><div class="class-title"><?php echo htmlspecialchars($displayName); ?></div></div><div class="class-meta"><?php echo htmlspecialchars($class['teacher_name'] ?: 'Chưa phân công giáo viên'); ?> · <?php echo (int)$class['student_count']; ?> học viên</div><div class="class-meta"><?php echo htmlspecialchars($class['students'] ?: 'Chưa nhập học viên'); ?></div></td><?php foreach ($days as $day): $date=$day->format('Y-m-d'); $cellSlots=$slots[(int)$class['id']][$date]??[]; $weekend=(int)$day->format('N')>=6; ?><td class="schedule-cell <?php echo $weekend ? 'weekend' : ''; ?>" data-class-id="<?php echo (int)$class['id']; ?>" data-class-name="<?php echo htmlspecialchars($displayName, ENT_QUOTES); ?>" data-date="<?php echo $date; ?>"><?php foreach ($cellSlots as $slot): ?><button type="button" class="slot" data-slot-id="<?php echo (int)$slot['id']; ?>" data-start="<?php echo substr($slot['start_time'],0,5); ?>" data-end="<?php echo substr($slot['end_time'],0,5); ?>"><?php echo substr($slot['start_time'],0,5); ?> – <?php echo substr($slot['end_time'],0,5); ?></button><?php endforeach; ?><span class="empty-cell">+</span></td><?php endforeach; ?></tr><?php endforeach; ?><?php endforeach; ?><?php if (!$classes): ?><tr><td colspan="<?php echo count($days)+1; ?>" style="padding:34px;text-align:center;color:var(--text-muted)">Chưa có lớp nào. Hãy tạo lớp đầu tiên bằng nút "Tạo lớp mới".</td></tr><?php endif; ?></tbody></table></div></section>
 </div>
 <dialog class="schedule-dialog" id="class-dialog"><form method="post" id="class-form"><?php echo csrfField(); ?><input type="hidden" name="action" value="update_class"><input type="hidden" name="class_id" id="edit-class-id"><input type="hidden" name="month" value="<?php echo htmlspecialchars($month); ?>"><input type="hidden" name="scope" value="<?php echo $showOwnSchedule ? 'mine' : 'all'; ?>"><h2 class="dialog-title">Sửa lớp</h2><label>Khóa học trong hệ thống<select name="course_id" id="edit-course-id"><option value="">— Lớp riêng —</option><?php foreach ($courses as $course): ?><option value="<?php echo (int) $course['id']; ?>" data-title="<?php echo htmlspecialchars($course['title'], ENT_QUOTES); ?>"><?php echo htmlspecialchars($course['title']); ?></option><?php endforeach; ?></select></label><label>Tên lớp<input name="class_name" id="edit-class-name" required maxlength="191"></label><?php if ($canManageAllSchedules): ?><label>Giáo viên phụ trách<select name="teacher_id" id="edit-teacher-id"><option value="">Chưa phân công</option><?php foreach ($teachers as $teacher): ?><option value="<?php echo (int) $teacher['id']; ?>"><?php echo htmlspecialchars($teacher['name']); ?></option><?php endforeach; ?></select></label><?php endif; ?><label>Ca học<select name="time_shift" id="edit-time-shift"><option value="morning">🌅 Ca sáng (8h – 11h)</option><option value="afternoon">☀️ Ca chiều (14h – 17h)</option><option value="evening">🌙 Ca tối (18h – 21h)</option></select></label><label>Học viên trong lớp<textarea name="student_names" id="edit-student-names"></textarea></label><div class="dialog-actions"><button class="btn btn-outline" type="button" id="close-class-dialog">Hủy</button><button class="btn btn-primary" type="submit"><i class='bx bx-save'></i> Lưu lớp</button></div></form></dialog>
 <dialog class="schedule-dialog" id="schedule-dialog"><form id="slot-form"><h2 class="dialog-title" id="slot-title">Thêm buổi dạy</h2><p class="schedule-note" id="slot-subtitle"></p><input type="hidden" id="slot-class-id"><input type="hidden" id="slot-date"><input type="hidden" id="slot-id"><div class="time-grid"><label>Giờ bắt đầu<input id="slot-start" type="time" required></label><label>Giờ kết thúc<input id="slot-end" type="time" required></label></div><div class="dialog-actions"><button class="btn btn-outline delete-slot" id="delete-slot" type="button" hidden><i class='bx bx-trash'></i> Xóa buổi</button><button class="btn btn-outline" type="button" id="close-dialog">Hủy</button><button class="btn btn-primary" type="submit"><i class='bx bx-save'></i> Lưu thời gian</button></div></form></dialog>
@@ -826,37 +826,95 @@ document.addEventListener('click', (event) => {
 })();
 </script>
 <style>
-/* Keep the two schedule levels visible while the calendar body scrolls. */
-.calendar-wrap{position:relative}
-.calendar-wrap .schedule-table thead,.calendar-wrap .schedule-table .shift-label{position:static!important}
+/* Dùng cùng cơ chế cố định tiêu đề và ca học của teacher_schedules.php. */
+.calendar-wrap{position:relative;--schedule-header-height:70px}
+.calendar-wrap .schedule-table th,
+.calendar-wrap .schedule-table th.info-head{position:static}
+.calendar-wrap .schedule-table .shift-label{position:sticky;top:var(--schedule-header-height);z-index:12;box-shadow:0 2px 6px rgba(0,0,0,.24)}
+.calendar-wrap .schedule-table th{height:var(--schedule-header-height);box-sizing:border-box}
+.calendar-wrap .schedule-table td.info-cell{z-index:4}
+.schedule-sticky-head{position:sticky;top:0;left:0;z-index:20;height:0;overflow:visible;pointer-events:none}
+.schedule-sticky-head__content{position:absolute;top:0;left:0;height:var(--schedule-header-height);overflow:hidden;background:#1f517e}
+.schedule-sticky-head__content table{margin:0!important;border-collapse:separate;border-spacing:0;table-layout:fixed}
+.schedule-sticky-head__content th{height:var(--schedule-header-height)!important;box-sizing:border-box;background:#1f517e!important}
+.schedule-sticky-head__content th.weekend{background:#3d3d3d!important}
+.calendar-wrap .schedule-table th.today,.schedule-sticky-head__content th.today{box-shadow:inset 0 -4px 0 #ff3b6b!important}
+.schedule-sticky-shift{position:absolute;top:0;left:0;z-index:19;height:0;overflow:visible;pointer-events:none}
+.schedule-sticky-shift__content{position:absolute;top:0;left:0;display:none;box-sizing:border-box;padding:8px 14px;color:#fff;font-weight:800;font-size:13px;letter-spacing:.5px;white-space:nowrap;overflow:hidden;box-shadow:0 2px 6px rgba(0,0,0,.24);will-change:transform}
 </style>
-<style>.schedule-sticky-layers{position:sticky;top:0;z-index:100;height:0;overflow:visible;pointer-events:none}.schedule-sticky-head,.schedule-sticky-shift{position:absolute;left:0;overflow:hidden}.schedule-sticky-head{top:0;height:70px;background:#1f517e}.schedule-sticky-head table{border-collapse:separate;border-spacing:0}.schedule-sticky-head th{height:70px!important;box-sizing:border-box;background:#1f517e!important}.schedule-sticky-shift{display:flex;align-items:center;box-sizing:border-box;padding:8px 14px;font-weight:800;font-size:13px;letter-spacing:.5px;color:#fff;box-shadow:0 3px 8px rgba(0,0,0,.28)}</style>
 <script>
 (() => {
-  document.querySelectorAll('.calendar-wrap').forEach((wrap) => {
-    const table = wrap.querySelector('.schedule-table');
-    if (!table?.tHead) return;
-    const layer = document.createElement('div'); layer.className = 'schedule-sticky-layers';
-    const head = document.createElement('div'); head.className = 'schedule-sticky-head';
-    const headTable = table.cloneNode(false), cols = document.createElement('colgroup');
-    [...table.tHead.rows[0].cells].forEach((cell) => { const col = document.createElement('col'); col.style.width = cell.getBoundingClientRect().width + 'px'; cols.append(col); });
-    headTable.append(cols, table.tHead.cloneNode(true)); head.append(headTable);
-    const shift = document.createElement('div'); shift.className = 'schedule-sticky-shift';
-    layer.append(head, shift); wrap.prepend(layer);
-    const update = () => {
-      const width = table.getBoundingClientRect().width, x = wrap.scrollLeft;
-      head.style.width = width + 'px'; head.style.transform = `translateX(${-x}px)`;
-      headTable.style.width = width + 'px';
-      const headerHeight = 70;
-      const headers = [...table.querySelectorAll('tbody .shift-header')];
-      const active = headers.filter((row) => row.offsetTop <= wrap.scrollTop + headerHeight + 1).pop() || headers[0];
-      const label = active?.querySelector('.shift-label');
-      if (!label) { shift.hidden = true; return; }
-      shift.hidden = false; shift.textContent = label.textContent.trim(); shift.style.background = getComputedStyle(label).backgroundColor;
-      shift.style.top = headerHeight + 'px'; shift.style.width = width + 'px'; shift.style.transform = `translateX(${-x}px)`;
-    };
-    wrap.addEventListener('scroll', update, {passive:true}); window.addEventListener('resize', update); update();
-  });
+    document.querySelectorAll('.calendar-wrap').forEach((wrap) => {
+        const table = wrap.querySelector('.schedule-table');
+        if (!table || !table.tHead || wrap.querySelector('.schedule-sticky-head')) return;
+
+        const sticky = document.createElement('div');
+        sticky.className = 'schedule-sticky-head';
+        const content = document.createElement('div');
+        content.className = 'schedule-sticky-head__content';
+        const cloneTable = table.cloneNode(false);
+        const colgroup = document.createElement('colgroup');
+        cloneTable.appendChild(colgroup);
+        cloneTable.appendChild(table.tHead.cloneNode(true));
+        content.appendChild(cloneTable);
+        sticky.appendChild(content);
+        wrap.prepend(sticky);
+
+        const shiftSticky = document.createElement('div');
+        shiftSticky.className = 'schedule-sticky-shift';
+        const shiftContent = document.createElement('div');
+        shiftContent.className = 'schedule-sticky-shift__content';
+        shiftSticky.appendChild(shiftContent);
+        wrap.prepend(shiftSticky);
+        const shiftLabels = Array.from(table.querySelectorAll('tbody .shift-label'));
+        let activeShift = null;
+
+        const syncHeader = () => {
+            const cells = Array.from(table.tHead.rows[0].cells);
+            colgroup.replaceChildren(...cells.map((cell) => {
+                const col = document.createElement('col');
+                col.style.width = `${cell.getBoundingClientRect().width}px`;
+                return col;
+            }));
+            const width = table.getBoundingClientRect().width;
+            cloneTable.style.width = `${width}px`;
+            content.style.width = `${width}px`;
+            content.style.transform = `translateX(${-wrap.scrollLeft}px)`;
+
+            const headerHeight = Math.max(70, Math.ceil(table.tHead.getBoundingClientRect().height));
+            wrap.style.setProperty('--schedule-header-height', `${headerHeight}px`);
+            content.style.height = `${headerHeight}px`;
+
+            const stickyLine = wrap.scrollTop + headerHeight + 1;
+            let currentShift = null;
+            shiftLabels.forEach((label) => {
+                if (label.parentElement.offsetTop <= stickyLine) currentShift = label;
+            });
+
+            if (!currentShift) {
+                if (activeShift) activeShift.style.visibility = '';
+                shiftContent.style.display = 'none';
+                activeShift = null;
+                return;
+            }
+
+            if (currentShift !== activeShift) {
+                if (activeShift) activeShift.style.visibility = '';
+                shiftContent.textContent = currentShift.textContent.trim();
+                shiftContent.style.background = getComputedStyle(currentShift).backgroundColor;
+                currentShift.style.visibility = 'hidden';
+                activeShift = currentShift;
+            }
+            shiftContent.style.display = 'block';
+            shiftContent.style.width = `${width}px`;
+            shiftContent.style.height = `${Math.ceil(currentShift.getBoundingClientRect().height)}px`;
+            shiftContent.style.transform = `translate3d(${-wrap.scrollLeft}px, ${wrap.scrollTop + headerHeight}px, 0)`;
+        };
+
+        wrap.addEventListener('scroll', syncHeader, { passive: true });
+        window.addEventListener('resize', syncHeader);
+        syncHeader();
+    });
 })();
 </script>
 <?php require_once '../includes/footer.php'; ?>
