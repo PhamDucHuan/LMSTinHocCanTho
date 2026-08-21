@@ -131,6 +131,9 @@ require_once '../includes/header.php';
                     </label>
                     <div class="month-control"><input type="date" name="date" aria-label="Chọn ngày để xem tuần" value="<?php echo htmlspecialchars($anchorDay->format('Y-m-d')); ?>"><button class="btn btn-outline"><i class='bx bx-search'></i> Xem tuần</button></div>
                 </form>
+                <?php if ($teacherId > 0): ?>
+                    <a class="btn btn-outline" style="height:58px;display:inline-flex;align-items:center" href="export_weekly_schedule.php?teacher_id=<?php echo $teacherId; ?>&amp;date=<?php echo htmlspecialchars($anchorDay->format('Y-m-d')); ?>"><i class='bx bx-spreadsheet'></i>&nbsp; Xuất Excel</a>
+                <?php endif; ?>
                 <div class="month-nav">
                     <a class="btn btn-outline" title="Tuần trước" href="?teacher_id=<?php echo $teacherId; ?>&date=<?php echo $previousWeek; ?>"><i class='bx bx-chevron-left'></i></a>
                     <a class="btn btn-outline" title="Tuần hiện tại" href="?teacher_id=<?php echo $teacherId; ?>&date=<?php echo $todayDate; ?>">Hôm nay</a>

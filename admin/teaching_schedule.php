@@ -475,7 +475,7 @@ require_once '../includes/header.php';
   if (title) title.innerHTML = "<i class='bx bx-table'></i> Lịch dạy tuần " + weekStart + ' – ' + weekEnd;
   const submit = control.querySelector('button');
   if (submit) submit.textContent = 'Xem tuần';
-  const scope = <?php echo json_encode($showOwnSchedule ? 'mine' : ($isAdmin ? 'all' : '')); ?>;
+  const scope = <?php echo json_encode($showOwnSchedule || !$isAdmin ? 'mine' : 'all'); ?>;
   if (scope && !control.querySelector('input[name="scope"]')) control.insertAdjacentHTML('afterbegin', '<input type="hidden" name="scope" value="' + scope + '">');
   const nav = document.createElement('div');
   nav.className = 'week-nav';
@@ -484,9 +484,14 @@ require_once '../includes/header.php';
     '<a class="btn btn-outline" href="' + withScope(<?php echo json_encode($todayDate); ?>) + '">Hôm nay</a>' +
     '<a class="btn btn-outline" href="' + withScope(<?php echo json_encode($nextWeek); ?>) + '" title="Tuần sau">›</a>';
   control.after(nav);
+  const exportButton = document.createElement('a');
+  exportButton.className = 'btn btn-outline weekly-export';
+  exportButton.href = 'export_weekly_schedule.php?date=' + encodeURIComponent(selectedDate) + (scope ? '&scope=' + encodeURIComponent(scope) : '');
+  exportButton.innerHTML = "<i class='bx bx-spreadsheet'></i> Xuất Excel";
+  nav.after(exportButton);
 })();
 </script>
-<style>.month-control input[type="date"]{width:170px!important;min-height:42px;padding:8px 10px;border:1px solid transparent!important;border-radius:8px;background:transparent!important;color:var(--text-main)!important;font:700 14px inherit;cursor:pointer}.month-control input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(1);opacity:.9;cursor:pointer}.week-nav{display:flex;align-items:center;gap:8px}.week-nav .btn{min-height:42px;padding:8px 13px}</style>
+<style>.month-control input[type="date"]{width:170px!important;min-height:42px;padding:8px 10px;border:1px solid transparent!important;border-radius:8px;background:transparent!important;color:var(--text-main)!important;font:700 14px inherit;cursor:pointer}.month-control input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(1);opacity:.9;cursor:pointer}.week-nav{display:flex;align-items:center;gap:8px}.week-nav .btn,.weekly-export{min-height:42px;padding:8px 13px}.weekly-export{display:inline-flex;align-items:center;gap:6px}</style>
 <script>
 (() => { const dialog=document.getElementById('schedule-dialog'), token=<?php echo json_encode(csrfToken()); ?>, form=document.getElementById('slot-form'); const request=async body=>{const res=await fetch(location.href,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...body,csrf_token:token})});const data=await res.json();if(!data.ok)throw new Error(data.message||'Không thể lưu dữ liệu.');return data}; const open=(cell,slot)=>{document.getElementById('slot-class-id').value=cell.dataset.classId;document.getElementById('slot-date').value=cell.dataset.date;document.getElementById('slot-id').value=slot?.dataset.slotId||'';document.getElementById('slot-start').value=slot?.dataset.start||'08:00';document.getElementById('slot-end').value=slot?.dataset.end||'09:30';document.getElementById('slot-title').textContent=slot?'Chỉnh sửa buổi dạy':'Thêm buổi dạy';document.getElementById('slot-subtitle').textContent=cell.dataset.className+' · '+new Date(cell.dataset.date+'T00:00:00').toLocaleDateString('vi-VN');document.getElementById('delete-slot').hidden=!slot;dialog.showModal()}; document.querySelectorAll('.schedule-cell').forEach(cell=>cell.addEventListener('click',event=>{const slot=event.target.closest('.slot');open(cell,slot)}));document.getElementById('close-dialog').addEventListener('click',()=>dialog.close());form.addEventListener('submit',async event=>{event.preventDefault();try{await request({action:'save_slot',class_id:+document.getElementById('slot-class-id').value,slot_id:+document.getElementById('slot-id').value,date:document.getElementById('slot-date').value,start_time:document.getElementById('slot-start').value,end_time:document.getElementById('slot-end').value});location.reload()}catch(error){alert(error.message)}});document.getElementById('delete-slot').addEventListener('click',async()=>{if(!confirm('Xóa buổi dạy này?'))return;try{await request({action:'delete_slot',class_id:+document.getElementById('slot-class-id').value,slot_id:+document.getElementById('slot-id').value});location.reload()}catch(error){alert(error.message)}})})();
 </script>
