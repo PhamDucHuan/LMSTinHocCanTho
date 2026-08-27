@@ -1,8 +1,92 @@
-const qualitativePattern = /\b(đẹp|hợp lý|sáng tạo|cân đối|chuyên nghiệp|dễ đọc|thẩm mỹ|ấn tượng)\b/i;
 const colorPattern = /\b(màu|mau|color|colour|font color|fill|background|nền|to màu|tô màu)\b/i;
 
 function roundScore(value) {
   return Math.round(Number(value) * 100) / 100;
+}
+
+function inferLegacyTechnicalVerification(description, moduleName) {
+  const module = String(moduleName || '').toLowerCase();
+  const plain = String(description || '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replaceAll('đ', 'd');
+  if (module === 'excel') {
+    const cellRange = plain.match(/\b([a-z]{1,3}\d+:[a-z]{1,3}\d+)\b/)?.[1]?.toUpperCase();
+    if (/dat ten vung|named\s*range|defined\s*name|define\s*name/.test(plain)) {
+      const quotedName = plain.match(/["']([a-z_][a-z0-9_.]*)["']/)?.[1];
+      const assignedName = plain.match(/(?:dat ten vung|named\s*range).*?\bla\s+([a-z_][a-z0-9_.]*)/)?.[1]
+        || plain.match(/named\s*range\s*[:=]\s*([a-z_][a-z0-9_.]*)/)?.[1];
+      return {
+        type: 'excel_named_range_exists', rule_weight: 0.7, expected_kind: 'range',
+        ...((quotedName || assignedName) ? { expected_name: quotedName || assignedName } : {}),
+        ...(cellRange ? { expected_reference: cellRange } : {}),
+      };
+    }
+    if (/data\s*validation|xac thuc du lieu|kiem tra du lieu|danh sach tha xuong|drop\s*down\s*list/.test(plain)) {
+      const expectedType = /danh sach|drop\s*down|\blist\b/.test(plain) ? 'list'
+        : /so nguyen|whole\s*number/.test(plain) ? 'whole'
+          : /thap phan|decimal/.test(plain) ? 'decimal'
+            : /ngay|\bdate\b/.test(plain) ? 'date'
+              : /tuy chinh|custom/.test(plain) ? 'custom' : null;
+      return { type: 'excel_data_validation', rule_weight: 0.7, ...(expectedType ? { expected_type: expectedType } : {}), ...(cellRange ? { range: cellRange } : {}) };
+    }
+    if (/what\s*[- ]?if.*data\s*table|data\s*table|bang du lieu mot bien|bang du lieu hai bien/.test(plain)) {
+      const twoVariable = /hai bien|2 bien|two.variable/.test(plain);
+      return { type: 'excel_what_if_data_table_exists', rule_weight: 0.7, ...(twoVariable ? { two_variable: true } : {}), ...(cellRange ? { range: cellRange } : {}) };
+    }
+    if (/format\s*as\s*table|excel\s*table|listobject|tao bang co cau truc/.test(plain)) return { type: 'excel_structured_table_exists', rule_weight: 0.7, ...(cellRange ? { range: cellRange } : {}) };
+    return null;
+  }
+  if (module === 'powerpoint') {
+    const slideNumbers = [...plain.matchAll(/slide\s*(\d+)/g)].map(match => Number(match[1]));
+    if (/custom\s*slide\s*show|trinh chieu tuy bien|trinh chieu tuy chon/.test(plain)) {
+      const quotedName = plain.match(/["']([^"']+)["']/)?.[1];
+      const listedSlides = /(?:gom|cac)\s+slide/.test(plain) ? slideNumbers : [];
+      return { type: 'ppt_custom_slide_show_exists', rule_weight: 0.7, ...(quotedName ? { expected_name: quotedName } : {}), ...(listedSlides.length ? { expected_slides: listedSlides } : {}) };
+    }
+    if (/slide\s*master|trang chieu cai|ban cai(?: trang chieu)?/.test(plain)) {
+      const imageRequired = /logo|hinh anh|picture|image/.test(plain);
+      const quotedText = plain.match(/["']([^"']+)["']/)?.[1];
+      if (imageRequired || quotedText) return { type: 'ppt_master_object_exists', rule_weight: 0.7, ...(imageRequired ? { object_type: 'image' } : {}), ...(quotedText ? { text_contains: quotedText } : {}) };
+      if (/so trang|slide number/.test(plain)) return { type: 'ppt_slide_master_exists', rule_weight: 0.7, slide_number: true };
+      if (/chan trang|footer/.test(plain)) return { type: 'ppt_slide_master_exists', rule_weight: 0.7, footer: true };
+      if (/hinh nen|background|\bnen\b/.test(plain)) return { type: 'ppt_slide_master_exists', rule_weight: 0.7, background: true };
+      return null;
+    }
+    if (/lien ket|hyperlink|action\s*button|nut hanh dong/.test(plain) && /slide|trang chieu/.test(plain)) {
+      const sourceAndTarget = plain.match(/(?:tu|from)\s*slide\s*(\d+).*?(?:den|toi|to)\s*slide\s*(\d+)/);
+      const targetOnly = plain.match(/(?:den|toi|to)\s*slide\s*(\d+)/);
+      const sourceSlide = sourceAndTarget ? Number(sourceAndTarget[1]) : null;
+      const targetSlide = sourceAndTarget ? Number(sourceAndTarget[2]) : (targetOnly ? Number(targetOnly[1]) : (slideNumbers.length === 1 ? slideNumbers[0] : null));
+      const navigation = /ke tiep|next/.test(plain) ? 'nextslide'
+        : /truoc|previous/.test(plain) ? 'previousslide'
+          : /dau tien|first/.test(plain) ? 'firstslide'
+            : /cuoi|last/.test(plain) ? 'lastslide' : null;
+      return { type: 'ppt_internal_hyperlink_exists', rule_weight: 0.7, ...(sourceSlide ? { source_slide: sourceSlide } : {}), ...(targetSlide ? { target_slide: targetSlide } : {}), ...(navigation ? { navigation } : {}) };
+    }
+    return null;
+  }
+  if (module !== 'word') return null;
+  if (/muc luc|table of contents|\btoc\b/.test(plain)) {
+    const range = plain.match(/(?:cap|level)\s*(\d+)\s*(?:-|den|toi)\s*(\d+)/);
+    const count = plain.match(/(\d+)\s*(?:cap|level)/);
+    return {
+      type: 'word_toc_exists',
+      rule_weight: 0.7,
+      ...(range ? { from_level: Number(range[1]), to_level: Number(range[2]) } : (count ? { from_level: 1, to_level: Number(count[1]) } : {})),
+    };
+  }
+  if (/smart\s*art/.test(plain)) return { type: 'word_smartart_exists', rule_weight: 0.7 };
+  if (/bieu mau|content\s*control|check\s*box|drop\s*down|combo\s*box|\bform\b/.test(plain)) {
+    const controlType = /check\s*box/.test(plain) ? 'checkbox'
+      : /drop\s*down/.test(plain) ? 'dropdown'
+        : /combo\s*box/.test(plain) ? 'combobox'
+          : /ngay|date/.test(plain) ? 'date' : null;
+    return { type: 'word_form_control_exists', rule_weight: 0.7, ...(controlType ? { control_type: controlType } : {}) };
+  }
+  if (/cong thuc|formula|sum\s*\(\s*(?:above|below|left|right)/.test(plain) && /\bbang\b|table|above|below|left|right/.test(plain)) {
+    const functionMatch = plain.match(/\b(sum|average|count|max|min|product|round)\b/);
+    const expectedFunction = functionMatch?.[1]?.toUpperCase() || (/\btong\b/.test(plain) ? 'SUM' : null);
+    return { type: 'word_table_formula_exists', rule_weight: 0.7, ...(expectedFunction ? { expected_function: expectedFunction } : {}) };
+  }
+  return null;
 }
 
 export function normalizeRubric({ rubric, rubricId, aiCriteria, moduleName, maxScore }) {
@@ -35,12 +119,13 @@ export function normalizeRubric({ rubric, rubricId, aiCriteria, moduleName, maxS
   const criteria = descriptions.map((description, index) => {
     const score = index === descriptions.length - 1 ? roundScore(maxScore - allocated) : base;
     allocated += score;
+    const technicalVerification = inferLegacyTechnicalVerification(description, moduleName);
     return {
       id: `legacy_c${index + 1}`,
       description,
       max_score: score,
-      verification_type: qualitativePattern.test(description) ? 'ai_review' : 'ai_review',
-      verification: {},
+      verification_type: technicalVerification ? 'mixed' : 'ai_review',
+      verification: technicalVerification || {},
       grading_policy: colorPattern.test(description) ? 'ignore_color_differences' : 'standard',
       confidence: 0.5,
     };

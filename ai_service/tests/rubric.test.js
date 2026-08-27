@@ -17,6 +17,51 @@ test('legacy criteria are converted without changing total score', () => {
   assert.equal(result.generated_rubric.status, 'needs_review');
 });
 
+test('legacy Word advanced criteria receive mixed structural rules', () => {
+  const result = normalizeRubric({
+    aiCriteria: '- Tạo mục lục tự động 3 cấp\n- Chèn SmartArt\n- Tạo checkbox trong biểu mẫu\n- Dùng công thức SUM(ABOVE) trong bảng',
+    moduleName: 'Word',
+    maxScore: 10,
+  });
+  assert.deepEqual(result.rubric.criteria.map(item => item.verification_type), ['mixed', 'mixed', 'mixed', 'mixed']);
+  assert.deepEqual(result.rubric.criteria.map(item => item.verification.type), [
+    'word_toc_exists', 'word_smartart_exists', 'word_form_control_exists', 'word_table_formula_exists',
+  ]);
+  assert.deepEqual(result.rubric.criteria[0].verification, { type: 'word_toc_exists', rule_weight: 0.7, from_level: 1, to_level: 3 });
+  assert.equal(result.rubric.criteria[2].verification.control_type, 'checkbox');
+  assert.equal(result.rubric.criteria[3].verification.expected_function, 'SUM');
+});
+
+test('legacy Excel advanced criteria receive mixed structural rules', () => {
+  const result = normalizeRubric({
+    aiCriteria: '- Đặt tên vùng là DanhSach\n- Tạo Data Validation dạng danh sách\n- Tạo Data Table hai biến\n- Dùng Format as Table',
+    moduleName: 'Excel',
+    maxScore: 10,
+  });
+  assert.deepEqual(result.rubric.criteria.map(item => item.verification_type), ['mixed', 'mixed', 'mixed', 'mixed']);
+  assert.deepEqual(result.rubric.criteria.map(item => item.verification.type), [
+    'excel_named_range_exists', 'excel_data_validation', 'excel_what_if_data_table_exists', 'excel_structured_table_exists',
+  ]);
+  assert.equal(result.rubric.criteria[0].verification.expected_name, 'danhsach');
+  assert.equal(result.rubric.criteria[1].verification.expected_type, 'list');
+  assert.equal(result.rubric.criteria[2].verification.two_variable, true);
+});
+
+test('legacy PowerPoint advanced criteria receive mixed structural rules', () => {
+  const result = normalizeRubric({
+    aiCriteria: '- Chèn logo trong Slide Master\n- Tạo Custom Slide Show gồm Slide 2, Slide 1\n- Tạo liên kết từ Slide 1 đến Slide 2',
+    moduleName: 'PowerPoint',
+    maxScore: 9,
+  });
+  assert.deepEqual(result.rubric.criteria.map(item => item.verification_type), ['mixed', 'mixed', 'mixed']);
+  assert.deepEqual(result.rubric.criteria.map(item => item.verification.type), [
+    'ppt_master_object_exists', 'ppt_custom_slide_show_exists', 'ppt_internal_hyperlink_exists',
+  ]);
+  assert.equal(result.rubric.criteria[0].verification.object_type, 'image');
+  assert.deepEqual(result.rubric.criteria[1].verification.expected_slides, [2, 1]);
+  assert.deepEqual({ source: result.rubric.criteria[2].verification.source_slide, target: result.rubric.criteria[2].verification.target_slide }, { source: 1, target: 2 });
+});
+
 test('AI cannot add criteria or exceed criterion max score', () => {
   const criteria = [{ id: 'a', description: 'A', max_score: 2, verification_type: 'ai_review' }];
   const results = validateAiCriteriaResults({
