@@ -51,11 +51,13 @@ function appendPlannedSlots(PDO $pdo, int $classId, int $userId, ?string $notBef
     $days = plannedWeekdays($config['planned_weekdays'] ?? '');
     $total = (int) ($config['total_sessions'] ?? 0);
     if ($total <= 0 || !$days || empty($config['planned_start_date']) || empty($config['planned_start_time']) || empty($config['planned_end_time'])) return;
-    $countStmt = $pdo->prepare('SELECT COUNT(*) FROM teaching_schedule_slots WHERE teaching_class_id=?');
+    // Buổi vắng được giữ lại làm lịch sử, nhưng không tính vào số buổi thực học
+    // đã cấu hình. Vì vậy mỗi lần có buổi vắng, lịch sẽ được nối thêm ở phía sau.
+    $countStmt = $pdo->prepare("SELECT COUNT(*) FROM teaching_schedule_slots WHERE teaching_class_id=? AND makeup_student_id IS NULL AND attendance_status<>'absent'");
     $countStmt->execute([$classId]);
     $remaining = $total - (int) $countStmt->fetchColumn();
     if ($remaining <= 0) return;
-    $lastStmt = $pdo->prepare('SELECT MAX(teaching_date) FROM teaching_schedule_slots WHERE teaching_class_id=?');
+    $lastStmt = $pdo->prepare('SELECT MAX(teaching_date) FROM teaching_schedule_slots WHERE teaching_class_id=? AND makeup_student_id IS NULL');
     $lastStmt->execute([$classId]);
     $lastDate = $lastStmt->fetchColumn();
     // Khi vừa xóa buổi cuối, MAX() sẽ lùi về buổi trước đó. Lấy thêm ngày vừa
@@ -75,23 +77,112 @@ function appendPlannedSlots(PDO $pdo, int $classId, int $userId, ?string $notBef
     }
 }
 
-function rebalancePlannedSchedule(PDO $pdo, int $classId, int $userId, bool $addedMakeup = false, ?string $notBeforeDate = null): void
+function rebalancePlannedSchedule(PDO $pdo, int $classId, int $userId, bool $trimExcess = false, ?string $notBeforeDate = null, ?int $protectedSlotId = null): void
 {
     $configStmt = $pdo->prepare('SELECT total_sessions FROM teaching_classes WHERE id=?');
     $configStmt->execute([$classId]);
     $total = (int) $configStmt->fetchColumn();
     if ($total <= 0) return;
-    if ($addedMakeup) {
-        $countStmt = $pdo->prepare('SELECT COUNT(*) FROM teaching_schedule_slots WHERE teaching_class_id=?');
-        $countStmt->execute([$classId]);
-        if ((int) $countStmt->fetchColumn() > $total) {
-            $lastPlanned = $pdo->prepare('SELECT id FROM teaching_schedule_slots WHERE teaching_class_id=? AND is_makeup=0 ORDER BY teaching_date DESC, start_time DESC, id DESC LIMIT 1');
-            $lastPlanned->execute([$classId]);
-            $slotId = (int) $lastPlanned->fetchColumn();
-            if ($slotId > 0) $pdo->prepare('DELETE FROM teaching_schedule_slots WHERE id=?')->execute([$slotId]);
+    if ($trimExcess) {
+        $countStmt = $pdo->prepare("SELECT COUNT(*) FROM teaching_schedule_slots WHERE teaching_class_id=? AND makeup_student_id IS NULL AND attendance_status<>'absent'");
+        $deleteStmt = $pdo->prepare('DELETE FROM teaching_schedule_slots WHERE id=? AND teaching_class_id=?');
+        for ($guard = 0; $guard < 500; $guard++) {
+            $countStmt->execute([$classId]);
+            if ((int) $countStmt->fetchColumn() <= $total) break;
+
+            // Chỉ gỡ một buổi chưa diễn ra ở cuối lịch. Không bao giờ xóa buổi
+            // đã xác nhận Có học hoặc buổi Vắng đang được giữ làm lịch sử.
+            $params = [$classId];
+            $excludeSql = '';
+            if ($protectedSlotId !== null && $protectedSlotId > 0) {
+                $excludeSql = ' AND id<>?';
+                $params[] = $protectedSlotId;
+            }
+            $lastPending = $pdo->prepare("SELECT id FROM teaching_schedule_slots WHERE teaching_class_id=? AND makeup_student_id IS NULL AND attendance_status='pending' AND teaching_date>=CURDATE(){$excludeSql} ORDER BY teaching_date DESC, start_time DESC, id DESC LIMIT 1");
+            $lastPending->execute($params);
+            $slotId = (int) $lastPending->fetchColumn();
+            if ($slotId <= 0) break;
+            $deleteStmt->execute([$slotId, $classId]);
         }
     }
     appendPlannedSlots($pdo, $classId, $userId, $notBeforeDate);
+}
+
+function teachingStudentProgress(PDO $pdo, int $classId, int $studentId): array
+{
+    $totalStmt = $pdo->prepare('SELECT total_sessions FROM teaching_classes WHERE id=?');
+    $totalStmt->execute([$classId]);
+    $total = max(0, (int) $totalStmt->fetchColumn());
+    $sql = "SELECT
+                SUM(CASE WHEN (
+                    (ts.makeup_student_id IS NULL AND ts.attendance_status<>'absent' AND COALESCE(sa.attendance_status,'present')<>'absent')
+                    OR (ts.makeup_student_id=? AND ts.attendance_status<>'absent')
+                ) THEN 1 ELSE 0 END) AS eligible,
+                SUM(CASE WHEN (
+                    (ts.makeup_student_id IS NULL AND ts.attendance_status='present' AND COALESCE(sa.attendance_status,'present')='present')
+                    OR (ts.makeup_student_id=? AND ts.attendance_status='present')
+                ) THEN 1 ELSE 0 END) AS completed
+            FROM teaching_schedule_slots ts
+            LEFT JOIN teaching_schedule_student_attendance sa ON sa.slot_id=ts.id AND sa.student_id=?
+            WHERE ts.teaching_class_id=? AND (ts.makeup_student_id IS NULL OR ts.makeup_student_id=?)";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$studentId, $studentId, $studentId, $classId, $studentId]);
+    $progress = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+    return ['total' => $total, 'eligible' => (int) ($progress['eligible'] ?? 0), 'completed' => (int) ($progress['completed'] ?? 0)];
+}
+
+function rebalanceStudentSchedule(PDO $pdo, int $classId, int $studentId, int $userId, ?int $protectedSlotId = null): array
+{
+    $progress = teachingStudentProgress($pdo, $classId, $studentId);
+    $deletedIds = [];
+    $deleteStmt = $pdo->prepare('DELETE FROM teaching_schedule_slots WHERE id=? AND teaching_class_id=? AND makeup_student_id=?');
+    for ($guard = 0; $guard < 500 && $progress['total'] > 0 && ($progress['eligible'] > $progress['total'] || $progress['completed'] >= $progress['total']); $guard++) {
+        $params = [$classId, $studentId];
+        $excludeSql = '';
+        if ($protectedSlotId !== null && $protectedSlotId > 0) {
+            $excludeSql = ' AND id<>?';
+            $params[] = $protectedSlotId;
+        }
+        $lastPending = $pdo->prepare("SELECT id FROM teaching_schedule_slots WHERE teaching_class_id=? AND makeup_student_id=? AND attendance_status='pending' AND teaching_date>=CURDATE(){$excludeSql} ORDER BY teaching_date DESC, start_time DESC, id DESC LIMIT 1");
+        $lastPending->execute($params);
+        $slotId = (int) $lastPending->fetchColumn();
+        if ($slotId <= 0) break;
+        $deleteStmt->execute([$slotId, $classId, $studentId]);
+        $deletedIds[] = $slotId;
+        $progress = teachingStudentProgress($pdo, $classId, $studentId);
+    }
+
+    $addedSlots = [];
+    if ($progress['total'] <= 0 || $progress['completed'] >= $progress['total'] || $progress['eligible'] >= $progress['total']) {
+        return ['progress' => $progress, 'added_slots' => $addedSlots, 'deleted_slot_ids' => $deletedIds];
+    }
+    $configStmt = $pdo->prepare('SELECT planned_weekdays, planned_start_date, planned_start_time, planned_end_time FROM teaching_classes WHERE id=?');
+    $configStmt->execute([$classId]);
+    $config = $configStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+    $days = plannedWeekdays($config['planned_weekdays'] ?? '');
+    if (!$days || empty($config['planned_start_date']) || empty($config['planned_start_time']) || empty($config['planned_end_time'])) {
+        return ['progress' => $progress, 'added_slots' => $addedSlots, 'deleted_slot_ids' => $deletedIds];
+    }
+    $lastStmt = $pdo->prepare('SELECT MAX(teaching_date) FROM teaching_schedule_slots WHERE teaching_class_id=?');
+    $lastStmt->execute([$classId]);
+    $lastDate = (string) ($lastStmt->fetchColumn() ?: $config['planned_start_date']);
+    $cursor = (new DateTimeImmutable($lastDate))->modify('+1 day');
+    $insert = $pdo->prepare('INSERT INTO teaching_schedule_slots (teaching_class_id, teaching_date, start_time, end_time, is_makeup, makeup_student_id, created_by) VALUES (?, ?, ?, ?, 1, ?, ?)');
+    $needed = $progress['total'] - $progress['eligible'];
+    for ($guard = 0; $needed > 0 && $guard < 3660; $guard++, $cursor = $cursor->modify('+1 day')) {
+        if (!in_array((int) $cursor->format('N'), $days, true)) continue;
+        $insert->execute([$classId, $cursor->format('Y-m-d'), $config['planned_start_time'], $config['planned_end_time'], $studentId, $userId]);
+        $addedSlots[] = [
+            'id' => (int) $pdo->lastInsertId(),
+            'date' => $cursor->format('Y-m-d'),
+            'start_time' => substr((string) $config['planned_start_time'], 0, 5),
+            'end_time' => substr((string) $config['planned_end_time'], 0, 5),
+            'student_id' => $studentId,
+        ];
+        $needed--;
+    }
+    $progress = teachingStudentProgress($pdo, $classId, $studentId);
+    return ['progress' => $progress, 'added_slots' => $addedSlots, 'deleted_slot_ids' => $deletedIds];
 }
 
 function scheduleResponse(array $payload, int $status = 200): never
@@ -164,10 +255,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && str_contains((string) ($_SERVER['CO
                 throw new RuntimeException('Ngày hoặc khung giờ không hợp lệ.');
             }
             $slotId = (int) ($payload['slot_id'] ?? 0);
+            $isNewSlot = $slotId <= 0;
+            $attendanceStatus = 'pending';
+            $deletedSlotIds = [];
             if ($slotId > 0) {
-                $slotLookup = $pdo->prepare('SELECT 1 FROM teaching_schedule_slots WHERE id=? AND teaching_class_id=? LIMIT 1');
+                $slotLookup = $pdo->prepare('SELECT attendance_status FROM teaching_schedule_slots WHERE id=? AND teaching_class_id=? LIMIT 1');
                 $slotLookup->execute([$slotId, $classId]);
-                if (!$slotLookup->fetchColumn()) throw new RuntimeException('Không tìm thấy buổi dạy cần sửa.');
+                $attendanceStatus = (string) $slotLookup->fetchColumn();
+                if ($attendanceStatus === '') throw new RuntimeException('Không tìm thấy buổi dạy cần sửa.');
                 $classConfig = $pdo->prepare('SELECT planned_weekdays FROM teaching_classes WHERE id=?');
                 $classConfig->execute([$classId]);
                 $isMakeup = in_array((int) (new DateTimeImmutable($date))->format('N'), plannedWeekdays((string) $classConfig->fetchColumn()), true) ? 0 : 1;
@@ -179,10 +274,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && str_contains((string) ($_SERVER['CO
                 $classConfig->execute([$classId]);
                 $isMakeup = in_array((int) (new DateTimeImmutable($date))->format('N'), plannedWeekdays((string) $classConfig->fetchColumn()), true) ? 0 : 1;
                 $substituteTeacherId = (int) ($payload['substitute_teacher_id'] ?? 0) ?: null;
-                $stmt = $pdo->prepare('INSERT INTO teaching_schedule_slots (teaching_class_id, teaching_date, start_time, end_time, is_makeup, substitute_teacher_id, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)');
-                $stmt->execute([$classId, $date, $start, $end, $isMakeup, $substituteTeacherId, (int) $_SESSION['user_id']]);
-                $slotId = (int) $pdo->lastInsertId();
-                rebalancePlannedSchedule($pdo, $classId, (int) $_SESSION['user_id'], $isMakeup === 1);
+                $pdo->beginTransaction();
+                try {
+                    $lockClass = $pdo->prepare('SELECT id FROM teaching_classes WHERE id=? FOR UPDATE');
+                    $lockClass->execute([$classId]);
+                    $beforeSlotsStmt = $pdo->prepare('SELECT id FROM teaching_schedule_slots WHERE teaching_class_id=?');
+                    $beforeSlotsStmt->execute([$classId]);
+                    $beforeSlotIds = array_map('intval', $beforeSlotsStmt->fetchAll(PDO::FETCH_COLUMN));
+                    $stmt = $pdo->prepare('INSERT INTO teaching_schedule_slots (teaching_class_id, teaching_date, start_time, end_time, is_makeup, substitute_teacher_id, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)');
+                    $stmt->execute([$classId, $date, $start, $end, $isMakeup, $substituteTeacherId, (int) $_SESSION['user_id']]);
+                    $slotId = (int) $pdo->lastInsertId();
+                    rebalancePlannedSchedule($pdo, $classId, (int) $_SESSION['user_id'], true, null, $slotId);
+                    $afterSlotsStmt = $pdo->prepare('SELECT id FROM teaching_schedule_slots WHERE teaching_class_id=?');
+                    $afterSlotsStmt->execute([$classId]);
+                    $afterSlotIds = array_map('intval', $afterSlotsStmt->fetchAll(PDO::FETCH_COLUMN));
+                    $deletedSlotIds = array_values(array_diff($beforeSlotIds, $afterSlotIds));
+                    $pdo->commit();
+                } catch (Throwable $error) {
+                    if ($pdo->inTransaction()) $pdo->rollBack();
+                    throw $error;
+                }
             }
             writeAuditLog($pdo, 'teaching_schedule.slot_saved', 'teaching_schedule_slot', $slotId, ['class_id' => $classId, 'date' => $date]);
             scheduleResponse(['ok' => true, 'slot' => [
@@ -192,7 +303,129 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && str_contains((string) ($_SERVER['CO
                 'start_time' => $start,
                 'end_time' => $end,
                 'substitute_teacher_id' => $substituteTeacherId,
-            ]]);
+                'attendance_status' => $attendanceStatus,
+            ], 'is_new_slot' => $isNewSlot, 'deleted_slot_ids' => $deletedSlotIds]);
+        }
+        if ($action === 'set_attendance') {
+            $slotId = (int) ($payload['slot_id'] ?? 0);
+            $attendanceStatus = (string) ($payload['attendance_status'] ?? '');
+            if ($slotId <= 0 || !in_array($attendanceStatus, ['present', 'absent'], true)) {
+                throw new RuntimeException('Trạng thái buổi học không hợp lệ.');
+            }
+
+            $pdo->beginTransaction();
+            try {
+                $lockClass = $pdo->prepare('SELECT id FROM teaching_classes WHERE id=? FOR UPDATE');
+                $lockClass->execute([$classId]);
+                $slotLookup = $pdo->prepare('SELECT teaching_date, attendance_status, makeup_student_id FROM teaching_schedule_slots WHERE id=? AND teaching_class_id=? FOR UPDATE');
+                $slotLookup->execute([$slotId, $classId]);
+                $slot = $slotLookup->fetch(PDO::FETCH_ASSOC);
+                if (!$slot) throw new RuntimeException('Không tìm thấy buổi học cần xác nhận.');
+                if ((string) $slot['teaching_date'] > date('Y-m-d')) throw new RuntimeException('Chưa thể xác nhận một buổi học trong tương lai.');
+                if (!empty($slot['makeup_student_id'])) throw new RuntimeException('Buổi bù cá nhân cần được điểm danh theo đúng học viên.');
+
+                $updateAttendance = $pdo->prepare('UPDATE teaching_schedule_slots SET attendance_status=? WHERE id=? AND teaching_class_id=?');
+                $updateAttendance->execute([$attendanceStatus, $slotId, $classId]);
+                rebalancePlannedSchedule(
+                    $pdo,
+                    $classId,
+                    (int) $_SESSION['user_id'],
+                    $attendanceStatus === 'present',
+                    $attendanceStatus === 'absent' ? (string) $slot['teaching_date'] : null,
+                    $slotId
+                );
+                $studentStmt = $pdo->prepare('SELECT id FROM teaching_class_students WHERE teaching_class_id=?');
+                $studentStmt->execute([$classId]);
+                $studentIds = array_map('intval', $studentStmt->fetchAll(PDO::FETCH_COLUMN));
+                if (count($studentIds) >= 2) {
+                    foreach ($studentIds as $studentId) {
+                        rebalanceStudentSchedule($pdo, $classId, $studentId, (int) $_SESSION['user_id']);
+                    }
+                }
+                $pdo->commit();
+            } catch (Throwable $error) {
+                if ($pdo->inTransaction()) $pdo->rollBack();
+                throw $error;
+            }
+            writeAuditLog($pdo, 'teaching_schedule.attendance_updated', 'teaching_schedule_slot', $slotId, [
+                'class_id' => $classId,
+                'attendance_status' => $attendanceStatus,
+            ]);
+            scheduleResponse([
+                'ok' => true,
+                'attendance_status' => $attendanceStatus,
+                'message' => $attendanceStatus === 'present'
+                    ? 'Đã xác nhận lớp có học.'
+                    : 'Đã ghi nhận lớp vắng và tự xếp thêm một buổi ở cuối lịch.',
+            ]);
+        }
+        if ($action === 'set_student_attendance') {
+            $slotId = (int) ($payload['slot_id'] ?? 0);
+            $studentId = (int) ($payload['student_id'] ?? 0);
+            $attendanceStatus = (string) ($payload['attendance_status'] ?? '');
+            if ($slotId <= 0 || $studentId <= 0 || !in_array($attendanceStatus, ['present', 'absent'], true)) {
+                throw new RuntimeException('Thông tin điểm danh học viên không hợp lệ.');
+            }
+
+            $pdo->beginTransaction();
+            try {
+                $lockClass = $pdo->prepare('SELECT id FROM teaching_classes WHERE id=? FOR UPDATE');
+                $lockClass->execute([$classId]);
+                $studentsStmt = $pdo->prepare('SELECT id, student_name FROM teaching_class_students WHERE teaching_class_id=? ORDER BY student_name, id');
+                $studentsStmt->execute([$classId]);
+                $classStudents = $studentsStmt->fetchAll(PDO::FETCH_ASSOC);
+                if (count($classStudents) < 2) throw new RuntimeException('Điểm danh riêng chỉ áp dụng cho lớp có từ 2 học viên.');
+                $studentNames = [];
+                foreach ($classStudents as $classStudent) $studentNames[(int) $classStudent['id']] = (string) $classStudent['student_name'];
+                if (!isset($studentNames[$studentId])) throw new RuntimeException('Học viên không còn thuộc lớp này.');
+
+                $slotLookup = $pdo->prepare('SELECT teaching_date, attendance_status, makeup_student_id FROM teaching_schedule_slots WHERE id=? AND teaching_class_id=? FOR UPDATE');
+                $slotLookup->execute([$slotId, $classId]);
+                $slot = $slotLookup->fetch(PDO::FETCH_ASSOC);
+                if (!$slot) throw new RuntimeException('Không tìm thấy buổi học cần điểm danh.');
+                if ((string) $slot['teaching_date'] > date('Y-m-d')) throw new RuntimeException('Chưa thể điểm danh một buổi học trong tương lai.');
+
+                $makeupStudentId = (int) ($slot['makeup_student_id'] ?? 0);
+                if ($makeupStudentId > 0) {
+                    if ($makeupStudentId !== $studentId) throw new RuntimeException('Buổi bù này không thuộc học viên đã chọn.');
+                    $pdo->prepare('UPDATE teaching_schedule_slots SET attendance_status=? WHERE id=? AND teaching_class_id=?')->execute([$attendanceStatus, $slotId, $classId]);
+                } else {
+                    // Điểm danh một người đồng nghĩa lớp đã diễn ra; trạng thái cá nhân
+                    // sẽ ghi đè Có học mặc định của lớp cho riêng học viên đó.
+                    $pdo->prepare("UPDATE teaching_schedule_slots SET attendance_status='present' WHERE id=? AND teaching_class_id=?")->execute([$slotId, $classId]);
+                    $upsert = $pdo->prepare("INSERT INTO teaching_schedule_student_attendance (slot_id, student_id, attendance_status) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE attendance_status=VALUES(attendance_status)");
+                    $upsert->execute([$slotId, $studentId, $attendanceStatus]);
+                    rebalancePlannedSchedule($pdo, $classId, (int) $_SESSION['user_id'], true, null, $slotId);
+                }
+
+                $targetResult = null;
+                foreach (array_keys($studentNames) as $classStudentId) {
+                    $result = rebalanceStudentSchedule($pdo, $classId, (int) $classStudentId, (int) $_SESSION['user_id'], $classStudentId === $studentId ? $slotId : null);
+                    if ((int) $classStudentId === $studentId) $targetResult = $result;
+                }
+                $pdo->commit();
+            } catch (Throwable $error) {
+                if ($pdo->inTransaction()) $pdo->rollBack();
+                throw $error;
+            }
+            writeAuditLog($pdo, 'teaching_schedule.student_attendance_updated', 'teaching_schedule_slot', $slotId, [
+                'class_id' => $classId,
+                'student_id' => $studentId,
+                'attendance_status' => $attendanceStatus,
+            ]);
+            $progress = $targetResult['progress'] ?? teachingStudentProgress($pdo, $classId, $studentId);
+            scheduleResponse([
+                'ok' => true,
+                'student_id' => $studentId,
+                'student_name' => $studentNames[$studentId],
+                'attendance_status' => $attendanceStatus,
+                'progress' => $progress,
+                'added_slots' => $targetResult['added_slots'] ?? [],
+                'deleted_slot_ids' => $targetResult['deleted_slot_ids'] ?? [],
+                'message' => $attendanceStatus === 'absent' && $progress['completed'] < $progress['total']
+                    ? 'Đã ghi nhận vắng và cân lịch bù riêng cho học viên.'
+                    : 'Đã cập nhật điểm danh học viên.',
+            ]);
         }
         if ($action === 'delete_slot') {
             $slotId = (int) ($payload['slot_id'] ?? 0);
@@ -384,10 +617,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     } else {
                         $pdo->prepare('UPDATE teaching_classes SET class_name=?, notes=?, course_id=?, teacher_id=?, time_shift=? WHERE id=?')->execute([$className, $notes ?: null, $courseId ?: null, $teacherId, $timeShift, $classId]);
                     }
-                    $pdo->prepare('DELETE FROM teaching_class_students WHERE teaching_class_id=?')->execute([$classId]);
+                    // Đồng bộ theo tên để giữ nguyên ID và lịch sử điểm danh của học viên
+                    // vẫn còn trong lớp; chỉ xóa người thực sự bị bỏ khỏi danh sách.
+                    $existingStudentStmt = $pdo->prepare('SELECT id, student_name FROM teaching_class_students WHERE teaching_class_id=?');
+                    $existingStudentStmt->execute([$classId]);
+                    $existingStudents = $existingStudentStmt->fetchAll(PDO::FETCH_ASSOC);
+                    $submittedNames = array_fill_keys($names, true);
+                    $deleteStudentStmt = $pdo->prepare('DELETE FROM teaching_class_students WHERE id=? AND teaching_class_id=?');
+                    foreach ($existingStudents as $existingStudent) {
+                        if (!isset($submittedNames[(string) $existingStudent['student_name']])) {
+                            $deleteStudentStmt->execute([(int) $existingStudent['id'], $classId]);
+                        }
+                    }
                     if ($names) {
                         $studentStmt = $pdo->prepare('INSERT IGNORE INTO teaching_class_students (teaching_class_id, student_name) VALUES (?, ?)');
-                foreach ($names as $name) $studentStmt->execute([$classId, mb_substr($name, 0, 191, 'UTF-8')]);
+                        foreach ($names as $name) $studentStmt->execute([$classId, mb_substr($name, 0, 191, 'UTF-8')]);
                     }
                     $pdo->commit();
                     writeAuditLog($pdo, 'teaching_schedule.class_updated', 'teaching_class', $classId, ['class_name' => $className, 'student_count' => count($names), 'schedule_updated' => $updateSchedule, 'schedule_apply_date' => $updateSchedule ? $scheduleApplyDate : null]);
@@ -450,10 +694,20 @@ $pausedSql = "SELECT tc.id, tc.class_name, c.title AS course_title, u.name AS te
 if (!$canManageAllSchedules) $pausedSql .= ' AND tc.teacher_id=' . (int) $_SESSION['user_id'];
 $pausedSql .= ' ORDER BY tc.updated_at DESC, tc.id DESC';
 $pausedClasses = $pdo->query($pausedSql)->fetchAll();
-$slotStmt = $pdo->prepare('SELECT id, teaching_class_id, teaching_date, start_time, end_time, substitute_teacher_id FROM teaching_schedule_slots WHERE teaching_date BETWEEN ? AND ? ORDER BY start_time, id');
+$slotStmt = $pdo->prepare('SELECT ts.id, ts.teaching_class_id, ts.teaching_date, ts.start_time, ts.end_time, ts.substitute_teacher_id, ts.attendance_status, ts.makeup_student_id, makeup_student.student_name AS makeup_student_name FROM teaching_schedule_slots ts LEFT JOIN teaching_class_students makeup_student ON makeup_student.id=ts.makeup_student_id WHERE ts.teaching_date BETWEEN ? AND ? ORDER BY ts.start_time, ts.id');
 $slotStmt->execute([$firstDay->format('Y-m-d'), $lastDay->format('Y-m-d')]);
 $slots = [];
 foreach ($slotStmt as $slot) $slots[(int) $slot['teaching_class_id']][$slot['teaching_date']][] = $slot;
+$classStudents = [];
+if ($classes) {
+    $classIds = array_map('intval', array_column($classes, 'id'));
+    $studentStmt = $pdo->query('SELECT id, teaching_class_id, student_name FROM teaching_class_students WHERE teaching_class_id IN (' . implode(',', $classIds) . ') ORDER BY student_name, id');
+    foreach ($studentStmt as $student) $classStudents[(int) $student['teaching_class_id']][] = ['id' => (int) $student['id'], 'name' => (string) $student['student_name']];
+}
+$studentAttendanceMap = [];
+$studentAttendanceStmt = $pdo->prepare('SELECT sa.slot_id, sa.student_id, sa.attendance_status FROM teaching_schedule_student_attendance sa JOIN teaching_schedule_slots ts ON ts.id=sa.slot_id WHERE ts.teaching_date BETWEEN ? AND ?');
+$studentAttendanceStmt->execute([$firstDay->format('Y-m-d'), $lastDay->format('Y-m-d')]);
+foreach ($studentAttendanceStmt as $attendance) $studentAttendanceMap[(int) $attendance['slot_id']][(int) $attendance['student_id']] = (string) $attendance['attendance_status'];
 $customShiftStmt = $pdo->query("SELECT id, name, start_time, end_time, major_shift FROM teaching_shift_presets ORDER BY FIELD(major_shift, 'morning', 'afternoon', 'evening'), name, id");
 $customShiftPresets = $customShiftStmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -935,6 +1189,7 @@ document.addEventListener('click', (event) => {
   }));
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
+    const requestedSlotId = +document.getElementById('slot-id').value;
     const submitButton = form.querySelector('button[type="submit"]');
     const originalButtonHtml = submitButton.innerHTML;
     submitButton.disabled = true;
@@ -951,11 +1206,24 @@ document.addEventListener('click', (event) => {
       })});
       const result = await response.json();
       if (!result.ok) throw new Error(result.message || 'Không thể lưu ca dạy.');
+      (result.deleted_slot_ids || []).forEach((slotId) => {
+        const removedSlot = document.querySelector('.slot[data-slot-id="' + slotId + '"]');
+        if (!removedSlot) return;
+        const removedControls = removedSlot.nextElementSibling?.classList.contains('attendance-toggle') ? removedSlot.nextElementSibling : null;
+        removedControls?.remove();
+        removedSlot.remove();
+      });
       const savedSlot = result.slot;
       const cell = document.querySelector('.schedule-cell[data-class-id="' + savedSlot.class_id + '"][data-date="' + savedSlot.date + '"]');
       if (!cell) throw new Error('Đã lưu ca dạy nhưng không tìm thấy ô lịch để cập nhật.');
 
-      let slotButton = cell.querySelector('.slot[data-slot-id="' + savedSlot.id + '"]');
+      let slotButton = document.querySelector('.slot[data-slot-id="' + savedSlot.id + '"]');
+      const previousCell = slotButton?.closest('.schedule-cell');
+      const movedToAnotherCell = !!slotButton && previousCell !== cell;
+      if (movedToAnotherCell) {
+        const oldControls = slotButton.nextElementSibling?.classList.contains('attendance-toggle') ? slotButton.nextElementSibling : null;
+        oldControls?.remove();
+      }
       if (!slotButton) {
         slotButton = document.createElement('button');
         slotButton.type = 'button';
@@ -967,11 +1235,14 @@ document.addEventListener('click', (event) => {
       slotButton.textContent = slotButton.dataset.start + ' – ' + slotButton.dataset.end;
       slotSubstitutes[savedSlot.id] = +(savedSlot.substitute_teacher_id || 0);
 
-      if (!slotButton.isConnected) cell.insertBefore(slotButton, cell.querySelector('.add-slot'));
+      if (movedToAnotherCell || !slotButton.isConnected) cell.insertBefore(slotButton, cell.querySelector('.add-slot'));
       const addButton = cell.querySelector('.add-slot');
       [...cell.querySelectorAll('.slot')]
         .sort((first, second) => first.dataset.start.localeCompare(second.dataset.start))
         .forEach((button) => cell.insertBefore(button, addButton));
+      if ((result.is_new_slot || requestedSlotId <= 0 || movedToAnotherCell) && typeof window.enhanceTeachingScheduleSlot === 'function') {
+        window.enhanceTeachingScheduleSlot(slotButton);
+      }
       document.getElementById('slot-id').value = savedSlot.id;
       document.getElementById('schedule-dialog').close();
     } catch (error) {
@@ -1073,6 +1344,173 @@ document.addEventListener('click', (event) => {
         window.addEventListener('resize', syncHeader);
         syncHeader();
     });
+})();
+</script>
+<style>
+.slot.status-pending{background:#dbeafe;color:#173b68}.slot.status-present{background:#86efac;color:#123c22;box-shadow:inset 0 0 0 1px #22c55e}.slot.status-absent{background:#fca5a5;color:#5f1515;box-shadow:inset 0 0 0 1px #ef4444;text-decoration:line-through}.slot.student-makeup{background:#fde68a;color:#5b3b08;text-decoration:none}.schedule-cell.attendance-present{background:rgba(34,197,94,.16)!important}.schedule-cell.attendance-absent{background:rgba(239,68,68,.17)!important}.attendance-toggle{display:grid;grid-template-columns:1fr 1fr;gap:3px;margin:3px 0 1px}.attendance-choice{min-height:25px;padding:3px 4px;border:1px solid var(--border-color);border-radius:6px;background:rgba(255,255,255,.035);color:var(--text-muted);font:700 10px/1.15 inherit;cursor:pointer}.attendance-choice:hover{filter:brightness(1.12)}.attendance-choice.is-present{border-color:#22c55e;background:#166534;color:#dcfce7}.attendance-choice.is-absent{border-color:#ef4444;background:#991b1b;color:#fee2e2}.attendance-choice:disabled{cursor:wait;opacity:.65}.individual-attendance-open{grid-column:1/-1;border-color:#60a5fa;color:#bfdbfe}.student-attendance-dialog{width:min(620px,calc(100vw - 28px))}.student-attendance-list{display:grid;gap:8px;max-height:min(58vh,520px);overflow:auto}.student-attendance-row{display:grid;grid-template-columns:minmax(130px,1fr) auto;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--border-color);border-radius:10px}.student-attendance-row strong{overflow-wrap:anywhere}.student-attendance-actions{display:grid;grid-template-columns:repeat(2,82px);gap:5px}.student-attendance-status{min-height:20px;color:var(--text-muted);font-size:12px}@media(max-width:520px){.student-attendance-row{grid-template-columns:1fr}.student-attendance-actions{grid-template-columns:1fr 1fr}}
+</style>
+<style>.slot.student-makeup.status-present{background:#86efac;color:#123c22;text-decoration:none}.slot.student-makeup.status-absent{background:#fca5a5;color:#5f1515}</style>
+<script>
+(() => {
+    const today = <?php echo json_encode($todayDate); ?>;
+    const token = <?php echo json_encode(csrfToken()); ?>;
+    const classStudents = <?php echo json_encode($classStudents, JSON_UNESCAPED_UNICODE); ?>;
+    const studentAttendance = <?php echo json_encode($studentAttendanceMap, JSON_UNESCAPED_UNICODE); ?>;
+    const attendanceBySlot = <?php $slotAttendanceMap = []; foreach ($slots as $classSlots) foreach ($classSlots as $dateSlots) foreach ($dateSlots as $savedSlot) $slotAttendanceMap[(int) $savedSlot['id']] = (string) ($savedSlot['attendance_status'] ?? 'pending'); echo json_encode($slotAttendanceMap); ?>;
+    const makeupStudentBySlot = <?php $slotMakeupStudentMap = []; foreach ($slots as $classSlots) foreach ($classSlots as $dateSlots) foreach ($dateSlots as $savedSlot) if (!empty($savedSlot['makeup_student_id'])) $slotMakeupStudentMap[(int) $savedSlot['id']] = ['id' => (int) $savedSlot['makeup_student_id'], 'name' => (string) $savedSlot['makeup_student_name']]; echo json_encode($slotMakeupStudentMap, JSON_UNESCAPED_UNICODE); ?>;
+
+    const dialog = document.createElement('dialog');
+    dialog.className = 'schedule-dialog student-attendance-dialog';
+    dialog.innerHTML = '<form method="dialog"><h2 class="dialog-title">Điểm danh từng học viên</h2><p class="schedule-note student-attendance-subtitle"></p><div class="student-attendance-status"></div><div class="student-attendance-list"></div><div class="dialog-actions"><button class="btn btn-outline" value="cancel">Đóng</button></div></form>';
+    document.body.append(dialog);
+    const dialogList = dialog.querySelector('.student-attendance-list');
+    const dialogStatus = dialog.querySelector('.student-attendance-status');
+    let activeSlot = null;
+
+    const refreshCellColor = (cell) => {
+        const statuses = [...cell.querySelectorAll('.slot')].map((slot) => slot.dataset.attendanceStatus || 'pending');
+        cell.classList.remove('attendance-present', 'attendance-absent');
+        if (statuses.includes('absent')) cell.classList.add('attendance-absent');
+        else if (statuses.length && statuses.every((status) => status === 'present')) cell.classList.add('attendance-present');
+    };
+
+    const paintSlot = (slot, status) => {
+        slot.dataset.attendanceStatus = status;
+        attendanceBySlot[slot.dataset.slotId] = status;
+        slot.classList.remove('status-pending', 'status-present', 'status-absent');
+        slot.classList.add('status-' + status);
+        const target = makeupStudentBySlot[slot.dataset.slotId];
+        if (target) slot.classList.add('student-makeup');
+        slot.closest('.schedule-cell')?.querySelectorAll('.attendance-choice').forEach((choice) => {
+            if (choice.dataset.slotId !== slot.dataset.slotId || choice.dataset.studentId) return;
+            choice.classList.toggle('is-present', status === 'present' && choice.dataset.status === 'present');
+            choice.classList.toggle('is-absent', status === 'absent' && choice.dataset.status === 'absent');
+        });
+        const cell = slot.closest('.schedule-cell');
+        if (cell) refreshCellColor(cell);
+    };
+
+    const postAttendance = async (payload) => {
+        const response = await fetch(location.href, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({...payload, csrf_token: token})});
+        const result = await response.json();
+        if (!result.ok) throw new Error(result.message || 'Không thể cập nhật điểm danh.');
+        return result;
+    };
+
+    const removeDeletedSlots = (ids = []) => ids.forEach((id) => {
+        const removed = document.querySelector('.slot[data-slot-id="' + id + '"]');
+        if (!removed) return;
+        const controls = removed.nextElementSibling?.classList.contains('attendance-toggle') ? removed.nextElementSibling : null;
+        const cell = removed.closest('.schedule-cell');
+        controls?.remove(); removed.remove(); if (cell) refreshCellColor(cell);
+    });
+
+    const renderAddedSlots = (result, sourceCell) => (result.added_slots || []).forEach((added) => {
+        makeupStudentBySlot[added.id] = {id: +result.student_id, name: result.student_name};
+        attendanceBySlot[added.id] = 'pending';
+        const cell = document.querySelector('.schedule-cell[data-class-id="' + sourceCell.dataset.classId + '"][data-date="' + added.date + '"]');
+        if (!cell || cell.querySelector('.slot[data-slot-id="' + added.id + '"]')) return;
+        const slot = document.createElement('button');
+        slot.type = 'button'; slot.className = 'slot'; slot.dataset.slotId = added.id;
+        slot.dataset.start = added.start_time; slot.dataset.end = added.end_time;
+        cell.insertBefore(slot, cell.querySelector('.add-slot'));
+        enhanceSlot(slot);
+    });
+
+    const sendStudentAttendance = async (slot, studentId, status, buttons) => {
+        const cell = slot.closest('.schedule-cell');
+        buttons.querySelectorAll('button').forEach((button) => { button.disabled = true; });
+        try {
+            const result = await postAttendance({action: 'set_student_attendance', class_id: +cell.dataset.classId, slot_id: +slot.dataset.slotId, student_id: +studentId, attendance_status: status});
+            studentAttendance[slot.dataset.slotId] ||= {};
+            studentAttendance[slot.dataset.slotId][studentId] = status;
+            paintSlot(slot, result.attendance_status || 'present');
+            removeDeletedSlots(result.deleted_slot_ids);
+            renderAddedSlots(result, cell);
+            dialogStatus.textContent = result.message + ' Đã học ' + result.progress.completed + '/' + result.progress.total + ' buổi.';
+            if (activeSlot === slot) renderStudentRows(slot);
+        } catch (error) {
+            alert(error.message);
+            buttons.querySelectorAll('button').forEach((button) => { button.disabled = false; });
+        }
+    };
+
+    const choiceButton = (slot, studentId, value, label, current, container) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'attendance-choice' + (current === value ? ' is-' + value : '');
+        button.dataset.status = value;
+        button.dataset.slotId = slot.dataset.slotId;
+        if (studentId) button.dataset.studentId = studentId;
+        button.textContent = label;
+        button.addEventListener('click', async (event) => {
+            event.preventDefault(); event.stopPropagation();
+            if (studentId) return sendStudentAttendance(slot, studentId, value, container);
+            if (slot.dataset.attendanceStatus === value) return;
+            container.querySelectorAll('button').forEach((item) => { item.disabled = true; });
+            try {
+                const cell = slot.closest('.schedule-cell');
+                const result = await postAttendance({action: 'set_attendance', class_id: +cell.dataset.classId, slot_id: +slot.dataset.slotId, attendance_status: value});
+                paintSlot(slot, result.attendance_status);
+            } catch (error) { alert(error.message); }
+            container.querySelectorAll('button').forEach((item) => { item.disabled = false; });
+        });
+        return button;
+    };
+
+    function renderStudentRows(slot) {
+        const cell = slot.closest('.schedule-cell');
+        const students = classStudents[cell.dataset.classId] || [];
+        dialogList.replaceChildren();
+        students.forEach((student) => {
+            const row = document.createElement('div');
+            row.className = 'student-attendance-row';
+            const name = document.createElement('strong'); name.textContent = student.name;
+            const actions = document.createElement('div'); actions.className = 'student-attendance-actions';
+            const explicit = studentAttendance[slot.dataset.slotId]?.[student.id];
+            const current = explicit || (slot.dataset.attendanceStatus === 'present' ? 'present' : 'pending');
+            actions.append(choiceButton(slot, student.id, 'present', '✓ Có học', current, actions));
+            actions.append(choiceButton(slot, student.id, 'absent', '✕ Vắng', current, actions));
+            row.append(name, actions); dialogList.append(row);
+        });
+    }
+
+    const openStudentDialog = (slot) => {
+        activeSlot = slot;
+        const cell = slot.closest('.schedule-cell');
+        dialog.querySelector('.student-attendance-subtitle').textContent = cell.dataset.className + ' · ' + new Date(cell.dataset.date + 'T00:00:00').toLocaleDateString('vi-VN');
+        dialogStatus.textContent = 'Người vắng sẽ được tự xếp lịch bù riêng nếu chưa học đủ số buổi.';
+        renderStudentRows(slot);
+        dialog.showModal();
+    };
+
+    const enhanceSlot = (slot) => {
+        const status = attendanceBySlot[slot.dataset.slotId] || 'pending';
+        const cell = slot.closest('.schedule-cell');
+        const target = makeupStudentBySlot[slot.dataset.slotId];
+        if (target) slot.textContent = slot.dataset.start + ' – ' + slot.dataset.end + ' · Bù ' + target.name;
+        paintSlot(slot, status);
+        if (!cell || cell.dataset.date !== today) return;
+        const controls = document.createElement('div'); controls.className = 'attendance-toggle';
+        if (target) {
+            controls.append(choiceButton(slot, target.id, 'present', '✓ Có học', status, controls));
+            controls.append(choiceButton(slot, target.id, 'absent', '✕ Vắng', status, controls));
+        } else {
+            controls.append(choiceButton(slot, null, 'present', '✓ Có học', status, controls));
+            controls.append(choiceButton(slot, null, 'absent', '✕ Vắng', status, controls));
+            if ((classStudents[cell.dataset.classId] || []).length >= 2) {
+                const individual = document.createElement('button');
+                individual.type = 'button'; individual.className = 'attendance-choice individual-attendance-open'; individual.textContent = '👥 Điểm danh từng người';
+                individual.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); openStudentDialog(slot); });
+                controls.append(individual);
+            }
+        }
+        slot.after(controls);
+        paintSlot(slot, status);
+    };
+
+    window.enhanceTeachingScheduleSlot = enhanceSlot;
+    document.querySelectorAll('.slot').forEach(enhanceSlot);
 })();
 </script>
 <?php require_once '../includes/footer.php'; ?>
