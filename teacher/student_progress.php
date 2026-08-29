@@ -14,16 +14,46 @@ $courseFilter = filter_input(INPUT_GET, 'course_id', FILTER_VALIDATE_INT);
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'set_exam_date') {
     $cId = filter_input(INPUT_POST, 'course_id', FILTER_VALIDATE_INT);
     $sId = filter_input(INPUT_POST, 'student_id', FILTER_VALIDATE_INT);
-    $examDate = trim((string)$_POST['exam_date']);
+    $examDate = trim((string)($_POST['exam_date'] ?? ''));
     if ($examDate === '') $examDate = null;
-    
+
     if ($cId && $sId) {
-        $stmt = $pdo->prepare("UPDATE course_enrollments SET exam_date = ? WHERE course_id = ? AND student_id = ?");
-        $stmt->execute([$examDate, $cId, $sId]);
-        $_SESSION['success'] = "Cập nhật ngày thi thành công!";
+        $dateIsValid = $examDate === null;
+        if ($examDate !== null) {
+            $parsedDate = DateTimeImmutable::createFromFormat('!Y-m-d', $examDate);
+            $dateIsValid = $parsedDate !== false && $parsedDate->format('Y-m-d') === $examDate;
+        }
+
+        if (!$dateIsValid) {
+            $_SESSION['error'] = "Ngày thi không hợp lệ.";
+        } else {
+            $enrollmentSql = "SELECT 1
+                              FROM course_enrollments ce
+                              JOIN courses c ON c.id = ce.course_id
+                              WHERE ce.course_id = ? AND ce.student_id = ?";
+            $enrollmentParams = [$cId, $sId];
+            if ($_SESSION['user_role'] !== 'admin') {
+                $enrollmentSql .= " AND c.teacher_id = ?";
+                $enrollmentParams[] = (int) $_SESSION['user_id'];
+            }
+
+            $enrollmentStmt = $pdo->prepare($enrollmentSql);
+            $enrollmentStmt->execute($enrollmentParams);
+            if ($enrollmentStmt->fetchColumn()) {
+                $stmt = $pdo->prepare("UPDATE course_enrollments SET exam_date = ? WHERE course_id = ? AND student_id = ?");
+                $stmt->execute([$examDate, $cId, $sId]);
+                $_SESSION['success'] = "Cập nhật ngày thi thành công!";
+            } else {
+                $_SESSION['error'] = "Không tìm thấy học viên trong khóa học này hoặc bạn không có quyền cập nhật.";
+            }
+        }
         header('Location: student_progress.php' . ($courseFilter ? "?course_id=$courseFilter" : ""));
         exit;
     }
+
+    $_SESSION['error'] = "Thông tin học viên hoặc khóa học không hợp lệ.";
+    header('Location: student_progress.php' . ($courseFilter ? "?course_id=$courseFilter" : ""));
+    exit;
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'send_exam_reminder') {
@@ -322,7 +352,7 @@ require_once '../includes/header.php';
     </div>
 </div>
 
-<?php foreach ($courses as $course): ?>
+<?php foreach ($courses as $courseId => $course): ?>
     <section class="box course-progress">
         <div class="course-progress-heading">
             <h2><i class='bx bx-book-open'></i> <?php echo htmlspecialchars($course['title'], ENT_QUOTES, 'UTF-8'); ?></h2>
