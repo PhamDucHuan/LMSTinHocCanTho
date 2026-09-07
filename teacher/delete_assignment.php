@@ -61,11 +61,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id'])) {
         $pdo->prepare("DELETE FROM submissions WHERE assignment_id = ?")->execute([$id]);
         
         if ($_SESSION['user_role'] === 'admin') {
+        if ($_SESSION['user_role'] === 'admin') {
             $stmt = $pdo->prepare("DELETE FROM assignments WHERE id = ?");
             $stmt->execute([$id]);
         } else {
-            $stmt = $pdo->prepare("DELETE FROM assignments WHERE id = ? AND teacher_id = ?");
-            $stmt->execute([$id, $_SESSION['user_id']]);
+            $stmt = $pdo->prepare("DELETE FROM assignments WHERE id=? AND (teacher_id=? OR EXISTS (SELECT 1 FROM course_teachers ct WHERE ct.course_id=assignments.course_id AND ct.teacher_id=?))");
+            $stmt->execute([$id, $_SESSION['user_id'], $_SESSION['user_id']]);
+        }
+        } else {
+            $stmt = $pdo->prepare("DELETE FROM assignments WHERE id=? AND (teacher_id=? OR EXISTS (SELECT 1 FROM course_teachers ct WHERE ct.course_id=assignments.course_id AND ct.teacher_id=?))");
+            $stmt->execute([$id, $_SESSION['user_id'], $_SESSION['user_id']]);
         }
         writeAuditLog($pdo, 'assignment.deleted', 'assignment', (int) $id, ['title' => $assignment['title'], 'course_id' => $assignment['course_id']]);
         writeAuditLog($pdo, 'assignment.deleted', 'assignment', (int) $id, ['title' => $assignment['title'], 'course_id' => $assignment['course_id']]);

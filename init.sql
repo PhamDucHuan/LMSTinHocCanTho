@@ -42,6 +42,78 @@ CREATE TABLE IF NOT EXISTS course_enrollments (
     CONSTRAINT fk_enrollment_student FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS course_teachers (
+    course_id INT UNSIGNED NOT NULL,
+    teacher_id INT UNSIGNED NOT NULL,
+    added_by INT UNSIGNED NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (course_id, teacher_id),
+    INDEX idx_course_teachers_teacher (teacher_id, course_id),
+    CONSTRAINT fk_course_teachers_course FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE CASCADE,
+    CONSTRAINT fk_course_teachers_teacher FOREIGN KEY (teacher_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_course_teachers_adder FOREIGN KEY (added_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS course_materials (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    course_id INT UNSIGNED NOT NULL,
+    title VARCHAR(191) NOT NULL,
+    material_type ENUM('pdf','video') NOT NULL,
+    file_drive_id VARCHAR(191) NULL,
+    file_name VARCHAR(255) NULL,
+    youtube_video_id VARCHAR(32) NULL,
+    sort_order INT NOT NULL DEFAULT 0,
+    created_by INT UNSIGNED NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_course_materials_course (course_id, sort_order, id),
+    CONSTRAINT fk_course_materials_course FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE CASCADE,
+    CONSTRAINT fk_course_materials_creator FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS learning_classes (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    class_name VARCHAR(191) NOT NULL,
+    course_id INT UNSIGNED NOT NULL,
+    primary_teacher_id INT UNSIGNED NULL,
+    notes TEXT NULL,
+    status ENUM('active','archived') NOT NULL DEFAULT 'active',
+    legacy_teaching_class_id INT NULL UNIQUE,
+    created_by INT UNSIGNED NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_learning_classes_course (course_id, status),
+    INDEX idx_learning_classes_teacher (primary_teacher_id, status),
+    CONSTRAINT fk_learning_classes_course FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE CASCADE,
+    CONSTRAINT fk_learning_classes_primary_teacher FOREIGN KEY (primary_teacher_id) REFERENCES users(id) ON DELETE SET NULL,
+    CONSTRAINT fk_learning_classes_creator FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS learning_class_teachers (
+    learning_class_id INT UNSIGNED NOT NULL,
+    teacher_id INT UNSIGNED NOT NULL,
+    added_by INT UNSIGNED NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (learning_class_id, teacher_id),
+    INDEX idx_learning_class_teachers_teacher (teacher_id, learning_class_id),
+    CONSTRAINT fk_learning_class_teachers_class FOREIGN KEY (learning_class_id) REFERENCES learning_classes(id) ON DELETE CASCADE,
+    CONSTRAINT fk_learning_class_teachers_teacher FOREIGN KEY (teacher_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_learning_class_teachers_adder FOREIGN KEY (added_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS learning_class_students (
+    learning_class_id INT UNSIGNED NOT NULL,
+    student_id INT UNSIGNED NOT NULL,
+    exam_date DATE NULL,
+    added_by INT UNSIGNED NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (learning_class_id, student_id),
+    INDEX idx_learning_class_students_student (student_id, learning_class_id),
+    INDEX idx_learning_class_students_exam (exam_date, learning_class_id),
+    CONSTRAINT fk_learning_class_students_class FOREIGN KEY (learning_class_id) REFERENCES learning_classes(id) ON DELETE CASCADE,
+    CONSTRAINT fk_learning_class_students_student FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_learning_class_students_adder FOREIGN KEY (added_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS course_enrollment_requests (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     course_id INT UNSIGNED NOT NULL,

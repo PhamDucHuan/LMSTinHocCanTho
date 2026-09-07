@@ -6,6 +6,7 @@
     require_once '../includes/friendly_urls.php';
     require_once '../includes/notifications.php';
     require_once '../includes/audit.php';
+    require_once '../includes/authorization.php';
     /** @var PDO $pdo */
 
     if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_role'], ['teacher', 'administrative_staff', 'admin'], true)) {
@@ -31,11 +32,7 @@
         exit('Khóa học không hợp lệ.');
     }
 
-    $courseStmt = $_SESSION['user_role'] === 'admin'
-        ? $pdo->prepare('SELECT * FROM courses WHERE id = ?')
-        : $pdo->prepare('SELECT * FROM courses WHERE id = ? AND teacher_id = ?');
-    $courseStmt->execute($_SESSION['user_role'] === 'admin' ? [$courseId] : [$courseId, $_SESSION['user_id']]);
-    $course = $courseStmt->fetch();
+    $course = authorizationFindManageableCourse($pdo, (int) $courseId, (string) $_SESSION['user_role'], (int) $_SESSION['user_id']);
     if (!$course) {
         http_response_code(403);
         exit('Bạn không có quyền quản lý khóa học này.');
@@ -148,7 +145,7 @@
                     (int) $orderStmt->fetchColumn(),
                 ]);
                 $newQuizId = (int) $pdo->lastInsertId();
-                $studentStmt = $pdo->prepare('SELECT student_id FROM course_enrollments WHERE course_id=?');
+                $studentStmt = $pdo->prepare("SELECT DISTINCT lcs.student_id FROM learning_classes lc JOIN learning_class_students lcs ON lcs.learning_class_id=lc.id WHERE lc.course_id=? AND lc.status='active'");
                 $studentStmt->execute([$courseId]);
                 foreach ($studentStmt->fetchAll(PDO::FETCH_COLUMN) as $enrolledStudentId) {
                     createNotification(

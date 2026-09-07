@@ -14,9 +14,9 @@ function authorizationCanAccessAssignment(string $role, int $actorId, int $teach
     return $role === 'student' && ($courseId === null || $isEnrolled);
 }
 
-function authorizationCanTakeQuiz(string $role, bool $isPublished): bool
+function authorizationCanTakeQuiz(string $role, bool $isPublished, bool $hasCourseAccess): bool
 {
-    return $role === 'student' && $isPublished;
+    return $role === 'student' && $isPublished && $hasCourseAccess;
 }
 
 function authorizationCanDownloadSubmission(string $role, int $actorId, int $teacherId, int $studentId): bool
@@ -28,8 +28,33 @@ function authorizationCanDownloadSubmission(string $role, int $actorId, int $tea
 
 function authorizationStudentIsEnrolled(PDO $pdo, int $studentId, int $courseId): bool
 {
-    $stmt = $pdo->prepare('SELECT 1 FROM course_enrollments WHERE course_id=? AND student_id=? LIMIT 1');
+    $stmt = $pdo->prepare(
+        "SELECT 1
+         FROM courses c
+         WHERE c.id=? AND EXISTS (
+             SELECT 1
+             FROM learning_classes lc
+             JOIN learning_class_students lcs ON lcs.learning_class_id=lc.id
+             WHERE lc.course_id=c.id AND lc.status='active' AND lcs.student_id=?
+         ) LIMIT 1"
+    );
     $stmt->execute([$courseId, $studentId]);
+    return (bool) $stmt->fetchColumn();
+}
+
+function authorizationUserCanManageCourse(PDO $pdo, int $courseId, string $role, int $actorId): bool
+{
+    if ($role === 'admin') return true;
+    if (!in_array($role, ['teacher', 'administrative_staff'], true)) return false;
+    $stmt = $pdo->prepare(
+        'SELECT 1 FROM courses c
+         WHERE c.id=? AND (
+             c.teacher_id=? OR EXISTS (
+                 SELECT 1 FROM course_teachers ct WHERE ct.course_id=c.id AND ct.teacher_id=?
+             )
+         ) LIMIT 1'
+    );
+    $stmt->execute([$courseId, $actorId, $actorId]);
     return (bool) $stmt->fetchColumn();
 }
 
@@ -44,8 +69,10 @@ function authorizationFindAccessibleAssignment(PDO $pdo, int $assignmentId, stri
     $isEnrolled = $role === 'student' && $courseId !== null
         ? authorizationStudentIsEnrolled($pdo, $actorId, $courseId)
         : false;
-    return authorizationCanAccessAssignment($role, $actorId, (int) $assignment['teacher_id'], $courseId, $isEnrolled)
-        ? $assignment : null;
+    if (in_array($role, ['teacher', 'administrative_staff'], true) && $courseId !== null) {
+        return authorizationUserCanManageCourse($pdo, $courseId, $role, $actorId) ? $assignment : null;
+    }
+    return authorizationCanAccessAssignment($role, $actorId, (int) $assignment['teacher_id'], $courseId, $isEnrolled) ? $assignment : null;
 }
 
 function authorizationFindManageableAssignment(PDO $pdo, int $assignmentId, string $role, int $actorId): ?array
@@ -53,8 +80,11 @@ function authorizationFindManageableAssignment(PDO $pdo, int $assignmentId, stri
     $stmt = $pdo->prepare('SELECT * FROM assignments WHERE id=? LIMIT 1');
     $stmt->execute([$assignmentId]);
     $assignment = $stmt->fetch(PDO::FETCH_ASSOC);
-    return $assignment && authorizationCanManageOwnedResource($role, $actorId, (int) $assignment['teacher_id'])
-        ? $assignment : null;
+    if (!$assignment) return null;
+    if ($role === 'admin') return $assignment;
+    $courseId = $assignment['course_id'] === null ? null : (int) $assignment['course_id'];
+    if ($courseId !== null && authorizationUserCanManageCourse($pdo, $courseId, $role, $actorId)) return $assignment;
+    return authorizationCanManageOwnedResource($role, $actorId, (int) $assignment['teacher_id']) ? $assignment : null;
 }
 
 function authorizationFindManageableCourse(PDO $pdo, int $courseId, string $role, int $actorId): ?array
@@ -62,14 +92,16 @@ function authorizationFindManageableCourse(PDO $pdo, int $courseId, string $role
     $stmt = $pdo->prepare('SELECT * FROM courses WHERE id=? LIMIT 1');
     $stmt->execute([$courseId]);
     $course = $stmt->fetch(PDO::FETCH_ASSOC);
-    return $course && authorizationCanManageOwnedResource($role, $actorId, (int) $course['teacher_id'])
-        ? $course : null;
+    return $course && authorizationUserCanManageCourse($pdo, $courseId, $role, $actorId) ? $course : null;
 }
 
-function authorizationFindAvailableQuiz(PDO $pdo, int $quizId, string $role): ?array
+function authorizationFindAvailableQuiz(PDO $pdo, int $quizId, string $role, int $actorId): ?array
 {
     $stmt = $pdo->prepare('SELECT q.*, c.title AS course_title, c.slug AS course_slug FROM quizzes q JOIN courses c ON c.id=q.course_id WHERE q.id=? LIMIT 1');
     $stmt->execute([$quizId]);
     $quiz = $stmt->fetch(PDO::FETCH_ASSOC);
-    return $quiz && authorizationCanTakeQuiz($role, (bool) $quiz['is_published']) ? $quiz : null;
+    $hasCourseAccess = $quiz && $role === 'student'
+        ? authorizationStudentIsEnrolled($pdo, $actorId, (int) $quiz['course_id'])
+        : false;
+    return $quiz && authorizationCanTakeQuiz($role, (bool) $quiz['is_published'], $hasCourseAccess) ? $quiz : null;
 }

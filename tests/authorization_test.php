@@ -16,8 +16,9 @@ authTest('Enrolled student accesses assignment', fn() => authAssert(authorizatio
 authTest('Unenrolled student cannot access assignment or AI exam', fn() => authAssert(!authorizationCanAccessAssignment('student', 20, 7, 5, false)));
 authTest('General assignment remains accessible', fn() => authAssert(authorizationCanAccessAssignment('student', 20, 7, null, false)));
 authTest('Teacher cannot preview another teacher assignment', fn() => authAssert(!authorizationCanAccessAssignment('teacher', 7, 8, 5, false)));
-authTest('Every student takes published quiz without enrollment', fn() => authAssert(authorizationCanTakeQuiz('student', true)));
-authTest('Draft quiz is unavailable', fn() => authAssert(!authorizationCanTakeQuiz('student', false)));
+authTest('Student with course access takes published quiz', fn() => authAssert(authorizationCanTakeQuiz('student', true, true)));
+authTest('Student without course access cannot take quiz', fn() => authAssert(!authorizationCanTakeQuiz('student', true, false)));
+authTest('Draft quiz is unavailable', fn() => authAssert(!authorizationCanTakeQuiz('student', false, true)));
 authTest('Student downloads only own submission', function (): void {
     authAssert(authorizationCanDownloadSubmission('student', 20, 7, 20));
     authAssert(!authorizationCanDownloadSubmission('student', 21, 7, 20));

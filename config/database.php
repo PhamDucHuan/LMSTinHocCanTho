@@ -9,11 +9,17 @@ function createDatabaseConnection(): PDO
     $pass = envValue('DB_PASS', '');
     $port = (int) envValue('DB_PORT', '3306');
     $dsn = "mysql:host=$host;port=$port;dbname=$db;charset=utf8mb4";
+    // Khi chạy qua web server, tái sử dụng kết nối MySQL giúp tránh tạo một
+    // kết nối mạng mới cho mọi lượt tải trang. CLI luôn dùng kết nối mới để
+    // các tác vụ nền và kiểm thử không giữ kết nối không cần thiết.
+    $usePersistentConnection = PHP_SAPI !== 'cli'
+        && filter_var(envValue('DB_PERSISTENT_CONNECTIONS', 'true'), FILTER_VALIDATE_BOOLEAN);
     $options = [
         PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_EMULATE_PREPARES   => false,
-        PDO::ATTR_TIMEOUT            => max(1, min(10, (int) envValue('DB_CONNECT_TIMEOUT', '3'))),
+        PDO::ATTR_TIMEOUT            => max(1, min(5, (int) envValue('DB_PAGE_CONNECT_TIMEOUT', '2'))),
+        PDO::ATTR_PERSISTENT         => $usePersistentConnection,
         PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci",
     ];
     $connection = new PDO($dsn, $user, $pass, $options);
@@ -21,7 +27,22 @@ function createDatabaseConnection(): PDO
     return $connection;
 }
 
-function createDatabaseConnectionWithRetry(int $attempts = 3): PDO
+function isRetryableDatabaseConnectionError(PDOException $error): bool
+{
+    $sqlState = (string) $error->getCode();
+    $driverCode = (string) ($error->errorInfo[1] ?? '');
+    if (str_starts_with($sqlState, '08') || in_array($driverCode, ['2002', '2003', '2006', '2013'], true)) {
+        return true;
+    }
+
+    $message = strtolower($error->getMessage());
+    return str_contains($message, 'connection refused')
+        || str_contains($message, 'connection timed out')
+        || str_contains($message, 'lost connection')
+        || str_contains($message, 'server has gone away');
+}
+
+function createDatabaseConnectionWithRetry(int $attempts = 2): PDO
 {
     $attempts = max(1, min(5, $attempts));
     $lastError = null;
@@ -30,10 +51,14 @@ function createDatabaseConnectionWithRetry(int $attempts = 3): PDO
             return createDatabaseConnection();
         } catch (PDOException $error) {
             $lastError = $error;
-            if ($attempt < $attempts) {
-                // Hàng chờ ngắn phía máy chủ: 250ms, 750ms, 1.5s, 2.5s.
-                $delays = [250000, 750000, 1500000, 2500000];
-                usleep($delays[$attempt - 1] ?? 2500000);
+            if ($attempt < $attempts && isRetryableDatabaseConnectionError($error)) {
+                // Lỗi mạng thoáng qua: thử lại nhanh, có jitter để tránh nhiều
+                // request cùng lúc dồn vào cơ sở dữ liệu từ xa.
+                $delays = [150000, 400000, 900000, 1800000];
+                $baseDelay = $delays[$attempt - 1] ?? 1800000;
+                usleep($baseDelay + random_int(0, 100000));
+            } else {
+                break;
             }
         }
     }
@@ -149,7 +174,7 @@ HTML;
 
 try {
     if (!isset($GLOBALS['pdo']) || !$GLOBALS['pdo'] instanceof PDO) {
-        $GLOBALS['pdo'] = createDatabaseConnectionWithRetry((int) envValue('DB_CONNECT_RETRIES', '3'));
+        $GLOBALS['pdo'] = createDatabaseConnectionWithRetry((int) envValue('DB_PAGE_CONNECT_RETRIES', '2'));
     }
     $pdo = $GLOBALS['pdo'];
 } catch (\PDOException $e) {

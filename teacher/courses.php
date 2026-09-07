@@ -3,22 +3,48 @@ require_once '../includes/security.php';
 secureSessionStart();
 require_once '../config/database.php';
 require_once '../includes/friendly_urls.php';
+require_once '../includes/authorization.php';
+require_once '../includes/drive_helper.php';
 
 if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_role'], ['teacher', 'administrative_staff', 'admin'], true)) {
     header('Location: ../index.php');
     exit;
 }
 
+$availableTeachers = $pdo->query("SELECT id, name, email FROM users WHERE role IN ('teacher','administrative_staff','admin') AND is_approved=1 AND COALESCE(is_locked,0)=0 ORDER BY name, id")->fetchAll(PDO::FETCH_ASSOC);
+$availableTeacherIds = array_fill_keys(array_map(static fn(array $teacher): int => (int) $teacher['id'], $availableTeachers), true);
+$submittedTeacherIds = static function (mixed $value) use ($availableTeacherIds): array {
+    $ids = array_values(array_unique(array_filter(array_map('intval', is_array($value) ? $value : []), static fn(int $id): bool => isset($availableTeacherIds[$id]))));
+    sort($ids);
+    return $ids;
+};
+$syncCourseTeachers = static function (PDO $pdo, int $courseId, int $ownerId, array $teacherIds, int $actorId): void {
+    $teacherIds[] = $ownerId;
+    $teacherIds = array_values(array_unique(array_map('intval', $teacherIds)));
+    $pdo->prepare('DELETE FROM course_teachers WHERE course_id=?')->execute([$courseId]);
+    $insert = $pdo->prepare('INSERT INTO course_teachers (course_id, teacher_id, added_by) VALUES (?, ?, ?)');
+    foreach ($teacherIds as $teacherId) $insert->execute([$courseId, $teacherId, $actorId]);
+};
+
 // Xử lý tạo khóa học mới
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'create_course') {
     verifyCsrfToken();
     $title = trim($_POST['title']);
     $description = trim($_POST['description']);
-    $teacher_id = $_SESSION['user_id'];
+    $teacher_id = (int) $_SESSION['user_id'];
+    $teacherIds = $submittedTeacherIds($_POST['teacher_ids'] ?? []);
     
     if (!empty($title)) {
-        $stmt = $pdo->prepare("INSERT INTO courses (title, slug, description, teacher_id) VALUES (?, ?, ?, ?)");
-        $stmt->execute([$title, uniqueFriendlySlug($pdo, 'courses', $title), $description, $teacher_id]);
+        $pdo->beginTransaction();
+        try {
+            $stmt = $pdo->prepare("INSERT INTO courses (title, slug, description, teacher_id) VALUES (?, ?, ?, ?)");
+            $stmt->execute([$title, uniqueFriendlySlug($pdo, 'courses', $title), $description, $teacher_id]);
+            $syncCourseTeachers($pdo, (int) $pdo->lastInsertId(), $teacher_id, $teacherIds, $teacher_id);
+            $pdo->commit();
+        } catch (Throwable $error) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $error;
+        }
         $_SESSION['success'] = "Tạo khóa học thành công!";
         header("Location: courses.php");
         exit;
@@ -33,18 +59,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
     $course_id = filter_input(INPUT_POST, 'course_id', FILTER_VALIDATE_INT);
     $title = trim($_POST['title'] ?? '');
     $description = trim($_POST['description'] ?? '');
+    $teacherIds = $submittedTeacherIds($_POST['teacher_ids'] ?? []);
 
     if (!$course_id || $title === '') {
         $_SESSION['error'] = 'Tên khóa học không được để trống.';
     } else {
-        if ($_SESSION['user_role'] === 'admin') {
-            $stmt = $pdo->prepare("UPDATE courses SET title = ?, description = ? WHERE id = ?");
-            $stmt->execute([$title, $description, $course_id]);
+        $course = authorizationFindManageableCourse($pdo, (int) $course_id, (string) $_SESSION['user_role'], (int) $_SESSION['user_id']);
+        if (!$course) {
+            $stmt = $pdo->prepare('SELECT 1 WHERE 0');
+            $stmt->execute();
         } else {
-            $stmt = $pdo->prepare("UPDATE courses SET title = ?, description = ? WHERE id = ? AND teacher_id = ?");
-            $stmt->execute([$title, $description, $course_id, $_SESSION['user_id']]);
+            $pdo->beginTransaction();
+            try {
+                $stmt = $pdo->prepare("UPDATE courses SET title = ?, description = ? WHERE id = ?");
+                $stmt->execute([$title, $description, $course_id]);
+                $syncCourseTeachers($pdo, (int) $course_id, (int) $course['teacher_id'], $teacherIds, (int) $_SESSION['user_id']);
+                $pdo->commit();
+            } catch (Throwable $error) {
+                if ($pdo->inTransaction()) $pdo->rollBack();
+                throw $error;
+            }
         }
-        $_SESSION[$stmt->rowCount() > 0 ? 'success' : 'error'] = $stmt->rowCount() > 0
+        $courseSaved = (bool) $course;
+        $_SESSION[$courseSaved ? 'success' : 'error'] = $courseSaved
             ? 'Đã cập nhật thông tin khóa học.'
             : 'Không thể cập nhật hoặc thông tin không có thay đổi.';
     }
@@ -66,20 +103,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         }
     }
     
-    $stmt = $pdo->prepare("DELETE FROM courses WHERE id = ?");
-    $stmt->execute([$course_id]);
+    $materialStmt = $pdo->prepare("SELECT file_drive_id FROM course_materials WHERE course_id=? AND material_type='pdf' AND file_drive_id IS NOT NULL");
+    $materialStmt->execute([$course_id]);
+    $materialFileIds = $materialStmt->fetchAll(PDO::FETCH_COLUMN);
+    $pdo->beginTransaction();
+    try {
+        $pdo->prepare('DELETE FROM course_materials WHERE course_id=?')->execute([$course_id]);
+        $pdo->prepare('DELETE FROM course_teachers WHERE course_id=?')->execute([$course_id]);
+        $pdo->prepare('DELETE lct FROM learning_class_teachers lct JOIN learning_classes lc ON lc.id=lct.learning_class_id WHERE lc.course_id=?')->execute([$course_id]);
+        $pdo->prepare('DELETE lcs FROM learning_class_students lcs JOIN learning_classes lc ON lc.id=lcs.learning_class_id WHERE lc.course_id=?')->execute([$course_id]);
+        $pdo->prepare('DELETE FROM learning_classes WHERE course_id=?')->execute([$course_id]);
+        $stmt = $pdo->prepare("DELETE FROM courses WHERE id = ?");
+        $stmt->execute([$course_id]);
+        $pdo->commit();
+        foreach ($materialFileIds as $fileId) deleteFromDrive((string) $fileId);
+    } catch (Throwable $error) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        throw $error;
+    }
     $_SESSION['success'] = "Đã xóa khóa học thành công.";
     header("Location: courses.php");
     exit;
 }
 
 // Fetch danh sách khóa học
+$courseSelect = "SELECT c.*, owner.name AS owner_name,
+    COALESCE((SELECT GROUP_CONCAT(u.name ORDER BY u.name SEPARATOR ', ') FROM course_teachers ct JOIN users u ON u.id=ct.teacher_id WHERE ct.course_id=c.id), owner.name) AS teacher_names,
+    COALESCE((SELECT GROUP_CONCAT(ct.teacher_id ORDER BY ct.teacher_id) FROM course_teachers ct WHERE ct.course_id=c.id), c.teacher_id) AS teacher_ids,
+    (SELECT COUNT(DISTINCT lcs.student_id) FROM learning_classes lc JOIN learning_class_students lcs ON lcs.learning_class_id=lc.id WHERE lc.course_id=c.id AND lc.status='active') AS student_count
+    FROM courses c JOIN users owner ON owner.id=c.teacher_id";
 if ($_SESSION['user_role'] === 'admin') {
-    $stmt = $pdo->prepare("SELECT c.*, u.name as teacher_name, (SELECT COUNT(*) FROM course_enrollments ce WHERE ce.course_id = c.id) AS student_count, (SELECT COUNT(*) FROM course_enrollment_requests er WHERE er.course_id = c.id AND er.status = 'pending') AS pending_request_count FROM courses c JOIN users u ON c.teacher_id = u.id ORDER BY c.created_at DESC");
+    $stmt = $pdo->prepare($courseSelect . ' ORDER BY c.created_at DESC');
     $stmt->execute();
 } else {
-    $stmt = $pdo->prepare("SELECT c.*, u.name as teacher_name, (SELECT COUNT(*) FROM course_enrollments ce WHERE ce.course_id = c.id) AS student_count, (SELECT COUNT(*) FROM course_enrollment_requests er WHERE er.course_id = c.id AND er.status = 'pending') AS pending_request_count FROM courses c JOIN users u ON c.teacher_id = u.id WHERE c.teacher_id = ? ORDER BY c.created_at DESC");
-    $stmt->execute([$_SESSION['user_id']]);
+    $stmt = $pdo->prepare($courseSelect . ' WHERE c.teacher_id=? OR EXISTS (SELECT 1 FROM course_teachers mine WHERE mine.course_id=c.id AND mine.teacher_id=?) ORDER BY c.created_at DESC');
+    $stmt->execute([$_SESSION['user_id'], $_SESSION['user_id']]);
 }
 $courses = $stmt->fetchAll();
 
@@ -145,10 +203,11 @@ require_once '../includes/header.php';
     <div class="course-management-grid">
         <?php foreach ($courses as $course): ?>
             <div class="course-management-card">
-                <button type="button" class="edit-course-description" data-course-id="<?php echo (int) $course['id']; ?>" data-course-title="<?php echo htmlspecialchars($course['title'], ENT_QUOTES, 'UTF-8'); ?>" data-course-description="<?php echo htmlspecialchars($course['description'] ?? '', ENT_QUOTES, 'UTF-8'); ?>" title="Sửa tên và mô tả" style="position:absolute;top:15px;right:55px;background:rgba(56,189,248,.1);border:1px solid rgba(56,189,248,.25);color:#38bdf8;width:32px;height:32px;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;">
+                <button type="button" class="edit-course-description" data-course-id="<?php echo (int) $course['id']; ?>" data-course-title="<?php echo htmlspecialchars($course['title'], ENT_QUOTES, 'UTF-8'); ?>" data-course-description="<?php echo htmlspecialchars($course['description'] ?? '', ENT_QUOTES, 'UTF-8'); ?>" data-teacher-ids="<?php echo htmlspecialchars((string) $course['teacher_ids'], ENT_QUOTES, 'UTF-8'); ?>" title="Sửa tên, mô tả và giáo viên" style="position:absolute;top:15px;right:55px;background:rgba(56,189,248,.1);border:1px solid rgba(56,189,248,.25);color:#38bdf8;width:32px;height:32px;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;">
                     <i class='bx bx-edit'></i>
                 </button>
                 <form method="POST" action="" style="position: absolute; top: 15px; right: 15px; margin: 0; z-index: 10;" onsubmit="return confirm('Bạn có chắc chắn muốn xóa khóa học này? Lưu ý: Mọi bài tập và bài nộp trong khóa này sẽ bị xóa toàn bộ!');">
+                    <?php echo csrfField(); ?>
                     <input type="hidden" name="action" value="delete_course">
                     <input type="hidden" name="course_id" value="<?php echo $course['id']; ?>">
                     <button type="submit" style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); color: var(--danger); width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.background='var(--danger)'; this.style.color='#fff';" onmouseout="this.style.background='rgba(239, 68, 68, 0.1)'; this.style.color='var(--danger)';"><i class='bx bx-trash'></i></button>
@@ -156,7 +215,7 @@ require_once '../includes/header.php';
                 <i class='bx bx-book-bookmark course-management-icon'></i>
                 <h3 class="course-management-title"><?php echo htmlspecialchars($course['title']); ?></h3>
                 <div class="course-management-meta">
-                    <span><i class='bx bx-user'></i> Giảng viên: <?php echo htmlspecialchars($course['teacher_name']); ?></span>
+                    <span><i class='bx bx-user'></i> Giảng viên: <?php echo htmlspecialchars($course['teacher_names']); ?></span>
                     <span class="student-count"><i class='bx bx-group'></i> Số học viên: <strong><?php echo (int) $course['student_count']; ?></strong></span>
                 </div>
                 <p class="course-management-description">
@@ -167,13 +226,6 @@ require_once '../includes/header.php';
                         : htmlspecialchars(mb_strlen($description) > 140 ? mb_substr($description, 0, 140) . '...' : $description);
                     ?>
                 </p>
-                <div class="course-request-slot">
-                    <?php if ((int) $course['pending_request_count'] > 0): ?>
-                        <div style="display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:20px;background:rgba(245,158,11,.16);color:#fbbf24;font-size:13px;font-weight:700;">
-                            <i class='bx bx-time-five'></i> <?php echo (int) $course['pending_request_count']; ?> yêu cầu chờ duyệt
-                        </div>
-                    <?php endif; ?>
-                </div>
                 
                 <div class="course-management-actions">
                     <a href="course_detail.php?id=<?php echo $course['id']; ?>" class="btn btn-primary">
@@ -197,6 +249,7 @@ require_once '../includes/header.php';
         <span onclick="document.getElementById('createCourseModal').style.display='none'" style="position: absolute; right: 20px; top: 20px; cursor: pointer; font-size: 24px;">&times;</span>
         <h3 style="margin-top: 0;">Tạo Khóa Học Mới</h3>
         <form action="" method="POST">
+            <?php echo csrfField(); ?>
             <input type="hidden" name="action" value="create_course">
             <div class="form-group">
                 <label>Tên Khóa Học *</label>
@@ -205,6 +258,15 @@ require_once '../includes/header.php';
             <div class="form-group">
                 <label>Mô tả (Tùy chọn)</label>
                 <textarea name="description" rows="4"></textarea>
+            </div>
+            <div class="form-group">
+                <label>Giáo viên dùng chung khóa học</label>
+                <select name="teacher_ids[]" multiple size="6" style="width:100%">
+                    <?php foreach ($availableTeachers as $teacher): ?>
+                        <option value="<?php echo (int) $teacher['id']; ?>" <?php echo (int) $teacher['id'] === (int) $_SESSION['user_id'] ? 'selected' : ''; ?>><?php echo htmlspecialchars($teacher['name'] . ' — ' . $teacher['email']); ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <small>Giữ Ctrl (Windows) hoặc Command (Mac) để chọn nhiều giáo viên.</small>
             </div>
             <button type="submit" class="btn btn-primary" style="width: 100%;"><i class='bx bx-save'></i> Tạo khóa học</button>
         </form>
@@ -216,6 +278,7 @@ require_once '../includes/header.php';
         <button type="button" id="closeDescriptionModal" aria-label="Đóng" style="position:absolute;right:18px;top:16px;border:0;background:transparent;color:#fff;font-size:28px;cursor:pointer;">&times;</button>
         <h3 style="margin-top:0;padding-right:35px;">Sửa thông tin khóa học</h3>
         <form method="POST">
+            <?php echo csrfField(); ?>
             <input type="hidden" name="action" value="update_course_details">
             <input type="hidden" name="course_id" id="editDescriptionCourseId">
             <div class="form-group">
@@ -225,6 +288,15 @@ require_once '../includes/header.php';
             <div class="form-group">
                 <label for="editCourseDescription">Mô tả khóa học</label>
                 <textarea name="description" id="editCourseDescription" rows="7" maxlength="5000" placeholder="Nhập nội dung mô tả khóa học..."></textarea>
+            </div>
+            <div class="form-group">
+                <label for="editCourseTeachers">Giáo viên dùng chung khóa học</label>
+                <select name="teacher_ids[]" id="editCourseTeachers" multiple size="6" style="width:100%">
+                    <?php foreach ($availableTeachers as $teacher): ?>
+                        <option value="<?php echo (int) $teacher['id']; ?>"><?php echo htmlspecialchars($teacher['name'] . ' — ' . $teacher['email']); ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <small>Chủ sở hữu khóa học luôn được giữ trong danh sách.</small>
             </div>
             <button type="submit" class="btn btn-primary" style="width:100%;"><i class='bx bx-save'></i> Lưu thay đổi</button>
         </form>
@@ -237,6 +309,7 @@ require_once '../includes/header.php';
         const courseIdInput = document.getElementById('editDescriptionCourseId');
         const descriptionInput = document.getElementById('editCourseDescription');
         const courseTitleInput = document.getElementById('editCourseTitle');
+        const courseTeachersInput = document.getElementById('editCourseTeachers');
         const closeModal = () => modal.style.display = 'none';
 
         document.querySelectorAll('.edit-course-description').forEach(button => {
@@ -244,6 +317,8 @@ require_once '../includes/header.php';
                 courseIdInput.value = button.dataset.courseId;
                 courseTitleInput.value = button.dataset.courseTitle;
                 descriptionInput.value = button.dataset.courseDescription;
+                const teacherIds = new Set((button.dataset.teacherIds || '').split(',').filter(Boolean));
+                Array.from(courseTeachersInput.options).forEach(option => option.selected = teacherIds.has(option.value));
                 modal.style.display = 'flex';
                 courseTitleInput.focus();
                 courseTitleInput.select();

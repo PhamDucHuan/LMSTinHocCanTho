@@ -20,7 +20,7 @@ $selectedCourseSlug = trim((string) ($_GET['course'] ?? ''));
 if ($isStaff) {
     $courseStmt = $pdo->query("SELECT c.id, c.title, c.slug, c.description, COUNT(a.id) assignment_count FROM courses c LEFT JOIN assignments a ON a.course_id = c.id GROUP BY c.id, c.title, c.slug, c.description ORDER BY c.created_at DESC");
 } else {
-    $courseStmt = $pdo->prepare("SELECT c.id, c.title, c.slug, c.description, COUNT(a.id) assignment_count FROM courses c JOIN course_enrollments ce ON ce.course_id = c.id AND ce.student_id = ? LEFT JOIN assignments a ON a.course_id = c.id GROUP BY c.id, c.title, c.slug, c.description ORDER BY ce.enrolled_at DESC");
+    $courseStmt = $pdo->prepare("SELECT c.id, c.title, c.slug, c.description, COUNT(a.id) assignment_count FROM courses c LEFT JOIN assignments a ON a.course_id = c.id WHERE EXISTS (SELECT 1 FROM learning_classes lc JOIN learning_class_students lcs ON lcs.learning_class_id=lc.id WHERE lc.course_id=c.id AND lc.status='active' AND lcs.student_id=?) GROUP BY c.id, c.title, c.slug, c.description ORDER BY c.created_at DESC");
     $courseStmt->execute([$userId]);
 }
 $courses = $courseStmt->fetchAll();
@@ -112,7 +112,7 @@ require_once '../includes/header.php';
         <?php endif; ?>
     </div>
     <?php if (!$courses && $generalAssignmentCount === 0): ?>
-        <div class="box" style="text-align:center;padding:45px;color:var(--text-muted)"><i class='bx bx-folder-open' style="font-size:48px"></i><p>Bạn chưa được ghi danh vào khóa học nào.</p></div>
+        <div class="box" style="text-align:center;padding:45px;color:var(--text-muted)"><i class='bx bx-folder-open' style="font-size:48px"></i><p>Bạn chưa được phân vào lớp học nào.</p></div>
     <?php endif; ?>
 <?php else: ?>
     <div class="course-heading">

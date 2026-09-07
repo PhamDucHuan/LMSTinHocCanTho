@@ -60,10 +60,9 @@ $courseStmt = $pdo->prepare(
             (SELECT COUNT(DISTINCT s.assignment_id) FROM submissions s JOIN assignments a2 ON a2.id=s.assignment_id WHERE s.student_id=? AND a2.course_id=c.id) assignment_done,
             (SELECT COUNT(*) FROM quizzes q WHERE q.course_id=c.id AND q.is_published=1) quiz_total,
             (SELECT COUNT(DISTINCT qa.quiz_id) FROM quiz_attempts qa JOIN quizzes q2 ON q2.id=qa.quiz_id WHERE qa.student_id=? AND qa.submitted_at IS NOT NULL AND q2.course_id=c.id) quiz_done
-     FROM course_enrollments ce
-     JOIN courses c ON c.id=ce.course_id
-     WHERE ce.student_id=?
-     ORDER BY ce.enrolled_at DESC"
+     FROM courses c
+     WHERE EXISTS (SELECT 1 FROM learning_classes lc JOIN learning_class_students lcs ON lcs.learning_class_id=lc.id WHERE lc.course_id=c.id AND lc.status='active' AND lcs.student_id=?)
+     ORDER BY c.created_at DESC"
 );
 $courseStmt->execute([$studentId, $studentId, $studentId]);
 $courses = $courseStmt->fetchAll();

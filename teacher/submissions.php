@@ -37,16 +37,17 @@ if (!$assignment_id) {
 
     $filterCourseStmt = $_SESSION['user_role'] === 'admin'
         ? $pdo->query('SELECT id, title FROM courses ORDER BY title')
-        : $pdo->prepare('SELECT id, title FROM courses WHERE teacher_id=? ORDER BY title');
+        : $pdo->prepare('SELECT c.id, c.title FROM courses c WHERE c.teacher_id=? OR EXISTS (SELECT 1 FROM course_teachers ct WHERE ct.course_id=c.id AND ct.teacher_id=?) ORDER BY c.title');
     if ($_SESSION['user_role'] !== 'admin') {
-        $filterCourseStmt->execute([(int) $_SESSION['user_id']]);
+        $filterCourseStmt->execute([(int) $_SESSION['user_id'], (int) $_SESSION['user_id']]);
     }
     $filterCourses = $filterCourseStmt->fetchAll();
 
     $filterStudentConditions = [];
     $filterStudentParameters = [];
     if ($_SESSION['user_role'] !== 'admin') {
-        $filterStudentConditions[] = 'c.teacher_id=?';
+        $filterStudentConditions[] = '(c.teacher_id=? OR EXISTS (SELECT 1 FROM course_teachers ct WHERE ct.course_id=c.id AND ct.teacher_id=?))';
+        $filterStudentParameters[] = (int) $_SESSION['user_id'];
         $filterStudentParameters[] = (int) $_SESSION['user_id'];
     }
     if ($courseFilter) {
@@ -58,10 +59,12 @@ if (!$assignment_id) {
         : '';
     $filterStudentStmt = $pdo->prepare(
         "SELECT DISTINCT u.id, u.name, u.email
-         FROM course_enrollments ce
-         JOIN courses c ON c.id=ce.course_id
-         JOIN users u ON u.id=ce.student_id
+         FROM learning_classes lc
+         JOIN learning_class_students lcs ON lcs.learning_class_id=lc.id
+         JOIN courses c ON c.id=lc.course_id
+         JOIN users u ON u.id=lcs.student_id
          $filterStudentWhere
+           " . ($filterStudentWhere ? " AND" : " WHERE") . " lc.status='active'
          ORDER BY u.name, u.id"
     );
     $filterStudentStmt->execute($filterStudentParameters);
@@ -94,11 +97,11 @@ if (!$assignment_id) {
              LEFT JOIN courses c ON c.id=a.course_id
              LEFT JOIN submissions s ON s.assignment_id=a.id
              LEFT JOIN users u ON u.id=s.student_id
-             WHERE a.teacher_id=?
+             WHERE a.teacher_id=? OR EXISTS (SELECT 1 FROM course_teachers ct WHERE ct.course_id=a.course_id AND ct.teacher_id=?)
              GROUP BY a.id, a.title, a.type, a.course_id, a.priority_order, a.created_at, c.title
              ORDER BY c.title, a.priority_order, a.created_at, a.id"
         );
-        $overviewStmt->execute([(int) $_SESSION['user_id']]);
+        $overviewStmt->execute([(int) $_SESSION['user_id'], (int) $_SESSION['user_id']]);
     }
     $overviewAssignments = $overviewStmt->fetchAll();
     $overviewAssignments = array_values(array_filter(

@@ -8,6 +8,7 @@ require_once '../includes/question_bank.php';
 require_once '../includes/quiz_import.php';
 require_once '../includes/friendly_urls.php';
 require_once '../includes/audit.php';
+require_once '../includes/authorization.php';
 
 $actorId = (int) $_SESSION['user_id'];
 $isAdmin = ($_SESSION['user_role'] ?? '') === 'admin';
@@ -219,7 +220,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $courseId=(int)($_POST['course_id']??0);$count=max(1,min(200,(int)($_POST['question_count']??50)));$topicId=(int)($_POST['topic_id']??0);$difficulty=(string)($_POST['difficulty_filter']??'all');$title=trim((string)($_POST['quiz_title']??''));
             $difficultyCounts=['easy'=>max(0,(int)($_POST['easy_count']??0)),'medium'=>max(0,(int)($_POST['medium_count']??0)),'hard'=>max(0,(int)($_POST['hard_count']??0))];
             $distributionTotal=array_sum($difficultyCounts);if($distributionTotal>200)throw new RuntimeException('Tổng số câu theo mức độ không được vượt quá 200.');
-            $courseSql=$isAdmin?'SELECT * FROM courses WHERE id=?':'SELECT * FROM courses WHERE id=? AND teacher_id=?';$courseStmt=$pdo->prepare($courseSql);$courseStmt->execute($isAdmin?[$courseId]:[$courseId,$actorId]);$course=$courseStmt->fetch();if(!$course)throw new RuntimeException('Khóa học không hợp lệ.');
+            $course=authorizationFindManageableCourse($pdo,$courseId,(string)$_SESSION['user_role'],$actorId);if(!$course)throw new RuntimeException('Khóa học không hợp lệ.');
             $bankOwner = $isAdmin ? max(1, (int) ($_POST['bank_teacher_id'] ?? $actorId)) : (int) $course['teacher_id'];
             $baseConditions=['teacher_id=?'];$baseParams=[$bankOwner];if($topicId){$baseConditions[]='topic_id=?';$baseParams[]=$topicId;}$selected=[];
             if($distributionTotal>0){foreach($difficultyCounts as $level=>$levelCount){if($levelCount===0)continue;$levelRows=selectQuestionBankForCourse($pdo,$courseId,[...$baseConditions,'difficulty=?'],[...$baseParams,$level],$levelCount);if(count($levelRows)<$levelCount)throw new RuntimeException('Không đủ câu mức '.questionDifficultyLabel($level).'. Hiện có '.count($levelRows).' câu.');$selected=array_merge($selected,$levelRows);}$count=$distributionTotal;shuffle($selected);}else{$conditions=$baseConditions;$params=$baseParams;if(in_array($difficulty,['easy','medium','hard'],true)){$conditions[]='difficulty=?';$params[]=$difficulty;}$selected=selectQuestionBankForCourse($pdo,$courseId,$conditions,$params,$count);if(count($selected)<$count)throw new RuntimeException('Ngân hàng không đủ câu hỏi phù hợp. Hiện có '.count($selected).' câu.');}
@@ -240,7 +241,7 @@ $stmt=$pdo->prepare('SELECT qb.*,qt.name topic_name,u.name teacher_name FROM que
 $questionVersions=[];
 if($questions){$questionIds=array_map('intval',array_column($questions,'id'));$versionStmt=$pdo->query('SELECT id,question_id,version_number,created_at FROM question_bank_versions WHERE question_id IN ('.implode(',',$questionIds).') ORDER BY question_id,version_number DESC');foreach($versionStmt->fetchAll() as $version)$questionVersions[(int)$version['question_id']][]=$version;}
 $pageUrl=static function(int $page):string{$query=$_GET;unset($query['action']);$query['page']=$page;return '?'.http_build_query($query);};
-$coursesStmt=$isAdmin?$pdo->query('SELECT id,title FROM courses ORDER BY title'):$pdo->prepare('SELECT id,title FROM courses WHERE teacher_id=? ORDER BY title');if(!$isAdmin)$coursesStmt->execute([$actorId]);$courses=$coursesStmt->fetchAll();$teachers=$isAdmin?$pdo->query("SELECT id,name,role FROM users WHERE role IN ('teacher','administrative_staff','admin') ORDER BY FIELD(role,'admin','administrative_staff','teacher'),name")->fetchAll():[];
+$coursesStmt=$isAdmin?$pdo->query('SELECT id,title FROM courses ORDER BY title'):$pdo->prepare('SELECT c.id,c.title FROM courses c WHERE c.teacher_id=? OR EXISTS (SELECT 1 FROM course_teachers ct WHERE ct.course_id=c.id AND ct.teacher_id=?) ORDER BY c.title');if(!$isAdmin)$coursesStmt->execute([$actorId,$actorId]);$courses=$coursesStmt->fetchAll();$teachers=$isAdmin?$pdo->query("SELECT id,name,role FROM users WHERE role IN ('teacher','administrative_staff','admin') ORDER BY FIELD(role,'admin','administrative_staff','teacher'),name")->fetchAll():[];
 $page_title='Ngân hàng câu hỏi';require_once '../includes/header.php';
 ?>
 <style>

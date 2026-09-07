@@ -45,8 +45,11 @@ foreach ($upcomingAssignments as $assignment) {
     
     if ($assignment['course_id']) {
         $studentSql .= "
-            JOIN course_enrollments ce ON ce.student_id = u.id 
-            WHERE ce.course_id = ? AND u.role = 'student'
+            WHERE u.role = 'student' AND EXISTS (
+                SELECT 1 FROM learning_classes lc
+                JOIN learning_class_students lcs ON lcs.learning_class_id=lc.id
+                WHERE lc.course_id=? AND lc.status='active' AND lcs.student_id=u.id
+            )
         ";
         $params[] = $assignment['course_id'];
     } else {
@@ -94,26 +97,29 @@ foreach ($upcomingAssignments as $assignment) {
 // ==========================================
 // 2. Nhắc nhở Ngày thi sắp tới
 // ==========================================
-// Tìm các enrollment có exam_date trong vòng 3 ngày tới
+// Tìm từng học viên trong lớp có ngày thi trong vòng 3 ngày tới.
 $examStmt = $pdo->query("
-    SELECT ce.course_id, ce.student_id, ce.exam_date, u.name, u.email, c.title as course_title, c.teacher_id
-    FROM course_enrollments ce
-    JOIN users u ON u.id = ce.student_id
-    JOIN courses c ON c.id = ce.course_id
-    WHERE ce.exam_date IS NOT NULL 
-      AND ce.exam_date > NOW() 
-      AND ce.exam_date <= DATE_ADD(NOW(), INTERVAL 3 DAY)
+    SELECT lc.course_id, lcs.student_id, MIN(lcs.exam_date) exam_date, u.name, u.email, c.title as course_title, c.teacher_id
+    FROM learning_classes lc
+    JOIN learning_class_students lcs ON lcs.learning_class_id=lc.id
+    JOIN users u ON u.id=lcs.student_id
+    JOIN courses c ON c.id=lc.course_id
+    WHERE lc.status='active' AND lcs.exam_date IS NOT NULL
+      AND lcs.exam_date >= CURDATE()
+      AND lcs.exam_date <= DATE_ADD(CURDATE(), INTERVAL 3 DAY)
+    GROUP BY lc.course_id, lcs.student_id, u.name, u.email, c.title, c.teacher_id
 ");
 $upcomingExams = $examStmt->fetchAll(PDO::FETCH_ASSOC);
 
 foreach ($upcomingExams as $exam) {
     // Kiểm tra xem đã báo cho giáo viên về học viên này trong khóa học này chưa
+    $reminderType = 'exam_teacher_course_' . (int) $exam['course_id'];
     $checkLog = $pdo->prepare("
         SELECT 1 FROM reminder_logs 
-        WHERE user_id = ? AND type = 'exam_reminder_teacher' AND reference_id = ? 
+        WHERE user_id = ? AND type = ? AND reference_id = ?
         AND sent_at > DATE_SUB(NOW(), INTERVAL 1 DAY)
     ");
-    $checkLog->execute([$exam['teacher_id'], $exam['student_id']]);
+    $checkLog->execute([$exam['teacher_id'], $reminderType, $exam['student_id']]);
     
     if (!$checkLog->fetch()) {
         $daysLeft = ceil((strtotime($exam['exam_date']) - time()) / 86400);
@@ -124,8 +130,8 @@ foreach ($upcomingExams as $exam) {
         createNotification($pdo, (int)$exam['teacher_id'], 'reminder', $title, $message, '../teacher/student_progress.php?course_id=' . $exam['course_id']);
         
         // Ghi Log (đã báo giáo viên)
-        $pdo->prepare("INSERT INTO reminder_logs (user_id, type, reference_id) VALUES (?, 'exam_reminder_teacher', ?)")
-            ->execute([$exam['teacher_id'], $exam['student_id']]);
+        $pdo->prepare('INSERT INTO reminder_logs (user_id, type, reference_id) VALUES (?, ?, ?)')
+            ->execute([$exam['teacher_id'], $reminderType, $exam['student_id']]);
             
         log_cron("Đã báo giáo viên ({$exam['teacher_id']}) về kỳ thi của học viên {$exam['name']} môn {$exam['course_title']}");
     }

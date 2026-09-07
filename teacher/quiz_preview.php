@@ -4,9 +4,11 @@ require_once '../includes/security.php';
 secureSessionStart();
 requireRole(['teacher', 'administrative_staff', 'admin']);
 require_once '../config/database.php';
+require_once '../includes/authorization.php';
 $quizId=(int)($_GET['id']??0);$isAdmin=($_SESSION['user_role']??'')==='admin';
-$stmt=$pdo->prepare('SELECT q.*,c.title course_title FROM quizzes q JOIN courses c ON c.id=q.course_id WHERE q.id=?'.($isAdmin?'':' AND q.teacher_id=?'));
-$stmt->execute($isAdmin?[$quizId]:[$quizId,(int)$_SESSION['user_id']]);$quiz=$stmt->fetch();
+$stmt=$pdo->prepare('SELECT q.*,c.title course_title FROM quizzes q JOIN courses c ON c.id=q.course_id WHERE q.id=?');
+$stmt->execute([$quizId]);$quiz=$stmt->fetch();
+if($quiz && !authorizationUserCanManageCourse($pdo,(int)$quiz['course_id'],(string)$_SESSION['user_role'],(int)$_SESSION['user_id']))$quiz=null;
 if(!$quiz){http_response_code(404);exit('Không tìm thấy đề thi.');}
 $stmt=$pdo->prepare('SELECT qq.*,qs.title section_title FROM quiz_questions qq JOIN quiz_sections qs ON qs.id=qq.section_id WHERE qs.quiz_id=? ORDER BY qs.sort_order,qs.id,qq.sort_order,qq.id');$stmt->execute([$quizId]);$questions=$stmt->fetchAll();
 $page_title='Xem trước: '.$quiz['title'];require_once '../includes/header.php';

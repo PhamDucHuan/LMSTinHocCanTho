@@ -3,6 +3,7 @@ require_once '../includes/security.php';
 secureSessionStart();
 require_once '../config/database.php';
 require_once '../includes/friendly_urls.php';
+require_once '../includes/authorization.php';
 /** @var PDO $pdo */
 if (!isset($_SESSION['user_id']) || $_SESSION['user_role'] !== 'student') {
     header('Location: ../index.php'); exit;
@@ -17,14 +18,16 @@ if ($courseSlug !== '') {
     $courseId = (int) $slugStmt->fetchColumn();
 }
 if (!$courseId) {
-    $stmt = $pdo->query("
+    $stmt = $pdo->prepare("
         SELECT c.id, c.title, c.slug, c.description, COUNT(q.id) AS quiz_count,
                COUNT(DISTINCT COALESCE(NULLIF(TRIM(q.category), ''), 'Chưa phân loại')) AS category_count
         FROM courses c
         JOIN quizzes q ON q.course_id=c.id AND q.is_published=1
+        WHERE EXISTS (SELECT 1 FROM learning_classes lc JOIN learning_class_students lcs ON lcs.learning_class_id=lc.id WHERE lc.course_id=c.id AND lc.status='active' AND lcs.student_id=?)
         GROUP BY c.id,c.title,c.slug,c.description
         ORDER BY c.created_at DESC,c.id DESC
     ");
+    $stmt->execute([(int) $_SESSION['user_id']]);
     $quizCourses = $stmt->fetchAll();
     $page_title = 'Làm trắc nghiệm';
     require_once '../includes/header.php';
@@ -34,7 +37,7 @@ if (!$courseId) {
     @media(max-width:1000px){.quiz-course-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:650px){.quiz-course-grid{grid-template-columns:1fr}}
     </style>
     <h1><i class='bx bx-list-check'></i> Làm trắc nghiệm</h1>
-    <p style="color:var(--text-muted)">Chọn khóa học trước, sau đó chọn danh mục trắc nghiệm phù hợp. Bạn không cần ghi danh khóa học để làm trắc nghiệm.</p>
+    <p style="color:var(--text-muted)">Chọn khóa học của lớp bạn, sau đó chọn danh mục trắc nghiệm phù hợp.</p>
     <div class="quiz-course-grid">
         <?php foreach($quizCourses as $quizCourse):?>
             <article class="box quiz-course-card">
@@ -50,6 +53,10 @@ if (!$courseId) {
     <?php
     require_once '../includes/footer.php';
     exit;
+}
+if (!authorizationStudentIsEnrolled($pdo, (int) $_SESSION['user_id'], (int) $courseId)) {
+    http_response_code(403);
+    exit('Bạn chưa được phân vào lớp học của khóa này.');
 }
 $stmt = $pdo->prepare('SELECT c.title,c.slug FROM courses c WHERE c.id=?');
 $stmt->execute([$courseId]);

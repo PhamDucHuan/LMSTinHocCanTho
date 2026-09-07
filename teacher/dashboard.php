@@ -12,14 +12,14 @@ $teacher_id = $_SESSION['user_id'];
 
 // Một truy vấn thay cho bốn lượt đếm riêng.
 $statsStmt = $pdo->prepare("SELECT
-    (SELECT COUNT(*) FROM courses WHERE teacher_id=?) AS courses,
+    (SELECT COUNT(*) FROM courses c WHERE c.teacher_id=? OR EXISTS (SELECT 1 FROM course_teachers ct WHERE ct.course_id=c.id AND ct.teacher_id=?)) AS courses,
     COUNT(DISTINCT a.id) AS assignments,
     COUNT(s.id) AS submissions,
     COALESCE(SUM(s.grading_status='review_required'),0) AS review_required
     FROM assignments a
     LEFT JOIN submissions s ON s.assignment_id=a.id
-    WHERE a.teacher_id=?");
-$statsStmt->execute([$teacher_id, $teacher_id]);
+    WHERE a.teacher_id=? OR EXISTS (SELECT 1 FROM course_teachers ct WHERE ct.course_id=a.course_id AND ct.teacher_id=?)");
+$statsStmt->execute([$teacher_id, $teacher_id, $teacher_id, $teacher_id]);
 $stats = $statsStmt->fetch();
 
 // Lấy số lượng bài nộp trên từng bài tập gần đây (tối đa 5 bài tập)
@@ -27,12 +27,12 @@ $recent_assignments = $pdo->prepare("
     SELECT a.title, COUNT(s.id) AS sub_count
     FROM assignments a
     LEFT JOIN submissions s ON s.assignment_id = a.id
-    WHERE a.teacher_id = ?
+    WHERE a.teacher_id=? OR EXISTS (SELECT 1 FROM course_teachers ct WHERE ct.course_id=a.course_id AND ct.teacher_id=?)
     GROUP BY a.id, a.title, a.created_at
     ORDER BY a.created_at DESC
     LIMIT 5
 ");
-$recent_assignments->execute([$teacher_id]);
+$recent_assignments->execute([$teacher_id, $teacher_id]);
 $assignment_data = $recent_assignments->fetchAll();
 
 $assign_labels = [];

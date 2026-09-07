@@ -2,6 +2,7 @@
 require_once '../includes/security.php';
 secureSessionStart();
 require_once '../config/database.php';
+require_once '../includes/authorization.php';
 /** @var PDO $pdo */
 
 if (empty($_SESSION['user_id']) || !in_array($_SESSION['user_role'] ?? '', ['teacher', 'administrative_staff', 'admin'], true)) {
@@ -10,6 +11,24 @@ if (empty($_SESSION['user_id']) || !in_array($_SESSION['user_role'] ?? '', ['tea
 }
 
 $courseFilter = filter_input(INPUT_GET, 'course_id', FILTER_VALIDATE_INT);
+$classFilter = filter_input(INPUT_GET, 'class_id', FILTER_VALIDATE_INT);
+$actorId = (int) $_SESSION['user_id'];
+$actorRole = (string) $_SESSION['user_role'];
+$isAdmin = $actorRole === 'admin';
+$returnParameters = [];
+if ($courseFilter) $returnParameters['course_id'] = (int) $courseFilter;
+if ($classFilter) $returnParameters['class_id'] = (int) $classFilter;
+$returnUrl = 'student_progress.php' . ($returnParameters ? '?' . http_build_query($returnParameters) : '');
+
+if ($isAdmin) {
+    $manageableCourseIds = array_fill_keys(array_map('intval', $pdo->query('SELECT id FROM courses')->fetchAll(PDO::FETCH_COLUMN)), true);
+} else {
+    $manageableStmt = $pdo->prepare('SELECT c.id FROM courses c WHERE c.teacher_id=? OR EXISTS (SELECT 1 FROM course_teachers ct WHERE ct.course_id=c.id AND ct.teacher_id=?)');
+    $manageableStmt->execute([$actorId, $actorId]);
+    $manageableCourseIds = array_fill_keys(array_map('intval', $manageableStmt->fetchAll(PDO::FETCH_COLUMN)), true);
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') verifyCsrfToken();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'set_exam_date') {
     $cId = filter_input(INPUT_POST, 'course_id', FILTER_VALIDATE_INT);
@@ -28,31 +47,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $_SESSION['error'] = "Ngày thi không hợp lệ.";
         } else {
             $enrollmentSql = "SELECT 1
-                              FROM course_enrollments ce
-                              JOIN courses c ON c.id = ce.course_id
-                              WHERE ce.course_id = ? AND ce.student_id = ?";
+                              FROM learning_classes lc
+                              JOIN learning_class_students lcs ON lcs.learning_class_id=lc.id
+                              JOIN courses c ON c.id=lc.course_id
+                              WHERE lc.course_id=? AND lcs.student_id=? AND lc.status='active'";
             $enrollmentParams = [$cId, $sId];
-            if ($_SESSION['user_role'] !== 'admin') {
-                $enrollmentSql .= " AND c.teacher_id = ?";
-                $enrollmentParams[] = (int) $_SESSION['user_id'];
+            if (!$isAdmin) {
+                $enrollmentSql .= " AND (c.teacher_id=? OR EXISTS (SELECT 1 FROM course_teachers ct WHERE ct.course_id=c.id AND ct.teacher_id=?))";
+                $enrollmentParams[] = $actorId;
+                $enrollmentParams[] = $actorId;
             }
 
             $enrollmentStmt = $pdo->prepare($enrollmentSql);
             $enrollmentStmt->execute($enrollmentParams);
             if ($enrollmentStmt->fetchColumn()) {
-                $stmt = $pdo->prepare("UPDATE course_enrollments SET exam_date = ? WHERE course_id = ? AND student_id = ?");
+                $stmt = $pdo->prepare("UPDATE learning_class_students lcs JOIN learning_classes lc ON lc.id=lcs.learning_class_id SET lcs.exam_date=? WHERE lc.course_id=? AND lcs.student_id=? AND lc.status='active'");
                 $stmt->execute([$examDate, $cId, $sId]);
                 $_SESSION['success'] = "Cập nhật ngày thi thành công!";
             } else {
                 $_SESSION['error'] = "Không tìm thấy học viên trong khóa học này hoặc bạn không có quyền cập nhật.";
             }
         }
-        header('Location: student_progress.php' . ($courseFilter ? "?course_id=$courseFilter" : ""));
+        header('Location: ' . $returnUrl);
         exit;
     }
 
     $_SESSION['error'] = "Thông tin học viên hoặc khóa học không hợp lệ.";
-    header('Location: student_progress.php' . ($courseFilter ? "?course_id=$courseFilter" : ""));
+    header('Location: ' . $returnUrl);
     exit;
 }
 
@@ -63,13 +84,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $sId = filter_input(INPUT_POST, 'student_id', FILTER_VALIDATE_INT);
     
     if ($cId && $sId) {
+        if (!authorizationUserCanManageCourse($pdo, (int) $cId, $actorRole, $actorId)) {
+            $_SESSION['error'] = 'Bạn không có quyền gửi nhắc nhở cho khóa học này.';
+            header('Location: ' . $returnUrl);
+            exit;
+        }
         // Lấy thông tin học viên và ngày thi
         $stmt = $pdo->prepare("
-            SELECT u.name, u.email, ce.exam_date, c.title as course_title 
-            FROM course_enrollments ce 
-            JOIN users u ON u.id = ce.student_id 
-            JOIN courses c ON c.id = ce.course_id 
-            WHERE ce.course_id = ? AND ce.student_id = ?
+            SELECT u.name, u.email, MAX(lcs.exam_date) exam_date, c.title as course_title
+            FROM learning_classes lc
+            JOIN learning_class_students lcs ON lcs.learning_class_id=lc.id
+            JOIN users u ON u.id=lcs.student_id
+            JOIN courses c ON c.id=lc.course_id
+            WHERE lc.course_id=? AND lcs.student_id=? AND lc.status='active'
+            GROUP BY u.id, u.name, u.email, c.id, c.title
         ");
         $stmt->execute([$cId, $sId]);
         $info = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -94,7 +122,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 
             $_SESSION['success'] = "Đã gửi thông báo nhắc nhở cho học viên {$info['name']}.";
         }
-        header('Location: student_progress.php' . ($courseFilter ? "?course_id=$courseFilter" : ""));
+        header('Location: ' . $returnUrl);
         exit;
     }
 }
@@ -108,22 +136,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     if (!empty($reminders) && is_array($reminders)) {
         $count = 0;
         foreach ($reminders as $rem) {
-            list($sId, $cId) = explode('-', $rem);
+            $parts = explode('-', (string) $rem, 2);
+            if (count($parts) !== 2) continue;
+            [$sId, $cId] = $parts;
             $sId = (int)$sId;
             $cId = (int)$cId;
             
             // Check authorization implicitly by checking if teacher owns course (if teacher)
-            $authCheck = "SELECT u.name, u.email, ce.exam_date, c.title as course_title 
-                          FROM course_enrollments ce 
-                          JOIN users u ON u.id = ce.student_id 
-                          JOIN courses c ON c.id = ce.course_id 
-                          WHERE ce.course_id = ? AND ce.student_id = ?";
+            $authCheck = "SELECT u.name, u.email, MAX(lcs.exam_date) exam_date, c.title as course_title
+                          FROM learning_classes lc
+                          JOIN learning_class_students lcs ON lcs.learning_class_id=lc.id
+                          JOIN users u ON u.id=lcs.student_id
+                          JOIN courses c ON c.id=lc.course_id
+                          WHERE lc.course_id=? AND lcs.student_id=? AND lc.status='active'";
             $params = [$cId, $sId];
-            if ($_SESSION['user_role'] !== 'admin') {
-                $authCheck .= " AND c.teacher_id = ?";
-                $params[] = (int)$_SESSION['user_id'];
+            if (!$isAdmin) {
+                $authCheck .= " AND (c.teacher_id=? OR EXISTS (SELECT 1 FROM course_teachers ct WHERE ct.course_id=c.id AND ct.teacher_id=?))";
+                $params[] = $actorId;
+                $params[] = $actorId;
             }
             
+            $authCheck .= ' GROUP BY u.id, u.name, u.email, c.id, c.title';
             $stmt = $pdo->prepare($authCheck);
             $stmt->execute($params);
             $info = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -154,50 +187,94 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     } else {
         $_SESSION['error'] = "Vui lòng chọn ít nhất 1 học viên để gửi nhắc nhở.";
     }
-    header('Location: student_progress.php' . ($courseFilter ? "?course_id=$courseFilter" : ""));
+    header('Location: ' . $returnUrl);
     exit;
 }
 
-$courseFilter = filter_input(INPUT_GET, 'course_id', FILTER_VALIDATE_INT);
 $conditions = [];
 $parameters = [];
-if ($_SESSION['user_role'] !== 'admin') {
-    $conditions[] = 'c.teacher_id = ?';
-    $parameters[] = (int) $_SESSION['user_id'];
+if (!$isAdmin) {
+    $conditions[] = '((c.teacher_id=? OR EXISTS (SELECT 1 FROM course_teachers ct WHERE ct.course_id=c.id AND ct.teacher_id=?)) OR lc.primary_teacher_id=? OR EXISTS (SELECT 1 FROM learning_class_teachers viewer_lct WHERE viewer_lct.learning_class_id=lc.id AND viewer_lct.teacher_id=?))';
+    array_push($parameters, $actorId, $actorId, $actorId, $actorId);
 }
 if ($courseFilter) {
     $conditions[] = 'c.id = ?';
     $parameters[] = (int) $courseFilter;
 }
+if ($classFilter) {
+    $conditions[] = 'lc.id = ?';
+    $parameters[] = (int) $classFilter;
+}
 $whereSql = $conditions ? 'WHERE ' . implode(' AND ', $conditions) : '';
 
-$courseSql = $_SESSION['user_role'] !== 'admin'
-    ? 'SELECT id, title FROM courses WHERE teacher_id=? ORDER BY title'
+$courseSql = !$isAdmin
+    ? "SELECT DISTINCT c.id, c.title FROM courses c
+       WHERE c.teacher_id=?
+          OR EXISTS (SELECT 1 FROM course_teachers ct WHERE ct.course_id=c.id AND ct.teacher_id=?)
+          OR EXISTS (
+              SELECT 1 FROM learning_classes access_lc
+              WHERE access_lc.course_id=c.id AND access_lc.status='active'
+                AND (access_lc.primary_teacher_id=? OR EXISTS (SELECT 1 FROM learning_class_teachers access_lct WHERE access_lct.learning_class_id=access_lc.id AND access_lct.teacher_id=?))
+          )
+       ORDER BY c.title"
     : 'SELECT id, title FROM courses ORDER BY title';
 $courseStmt = $pdo->prepare($courseSql);
-$courseStmt->execute($_SESSION['user_role'] !== 'admin' ? [(int) $_SESSION['user_id']] : []);
+$courseStmt->execute(!$isAdmin ? [$actorId, $actorId, $actorId, $actorId] : []);
 $availableCourses = $courseStmt->fetchAll();
+
+$classSql = "SELECT DISTINCT lc.id, lc.class_name, lc.course_id, c.title course_title
+             FROM learning_classes lc
+             JOIN courses c ON c.id=lc.course_id
+             WHERE lc.status='active'";
+$classParams = [];
+if (!$isAdmin) {
+    $classSql .= " AND ((c.teacher_id=? OR EXISTS (SELECT 1 FROM course_teachers ct WHERE ct.course_id=c.id AND ct.teacher_id=?))
+                       OR lc.primary_teacher_id=?
+                       OR EXISTS (SELECT 1 FROM learning_class_teachers viewer_lct WHERE viewer_lct.learning_class_id=lc.id AND viewer_lct.teacher_id=?))";
+    array_push($classParams, $actorId, $actorId, $actorId, $actorId);
+}
+if ($courseFilter) {
+    $classSql .= ' AND c.id=?';
+    $classParams[] = (int) $courseFilter;
+}
+$classSql .= ' ORDER BY c.title, lc.class_name, lc.id';
+$classStmt = $pdo->prepare($classSql);
+$classStmt->execute($classParams);
+$availableClasses = $classStmt->fetchAll(PDO::FETCH_ASSOC);
+$selectedClassName = '';
+foreach ($availableClasses as $availableClass) {
+    if ((int) $availableClass['id'] === (int) $classFilter) {
+        $selectedClassName = (string) $availableClass['class_name'];
+        break;
+    }
+}
 
 // Fetch upcoming exams (<= 7 days) for the modal
 $upcomingSql = "
-    SELECT ce.course_id, ce.student_id, ce.exam_date, u.name as student_name, c.title as course_title 
-    FROM course_enrollments ce 
-    JOIN users u ON u.id = ce.student_id 
-    JOIN courses c ON c.id = ce.course_id 
-    WHERE ce.exam_date IS NOT NULL 
-      AND ce.exam_date >= CURDATE() 
-      AND ce.exam_date <= DATE_ADD(CURDATE(), INTERVAL 7 DAY)
+    SELECT lc.course_id, lcs.student_id, MIN(lcs.exam_date) exam_date, u.name as student_name, c.title as course_title
+    FROM learning_classes lc
+    JOIN learning_class_students lcs ON lcs.learning_class_id=lc.id
+    JOIN users u ON u.id=lcs.student_id
+    JOIN courses c ON c.id=lc.course_id
+    WHERE lc.status='active' AND lcs.exam_date IS NOT NULL
+      AND lcs.exam_date >= CURDATE()
+      AND lcs.exam_date <= DATE_ADD(CURDATE(), INTERVAL 7 DAY)
 ";
 $upcomingParams = [];
-if ($_SESSION['user_role'] !== 'admin') {
-    $upcomingSql .= " AND c.teacher_id = ?";
-    $upcomingParams[] = (int) $_SESSION['user_id'];
+if (!$isAdmin) {
+    $upcomingSql .= " AND (c.teacher_id=? OR EXISTS (SELECT 1 FROM course_teachers ct WHERE ct.course_id=c.id AND ct.teacher_id=?))";
+    $upcomingParams[] = $actorId;
+    $upcomingParams[] = $actorId;
 }
 if ($courseFilter) {
     $upcomingSql .= " AND c.id = ?";
     $upcomingParams[] = (int) $courseFilter;
 }
-$upcomingSql .= " ORDER BY ce.exam_date ASC";
+if ($classFilter) {
+    $upcomingSql .= ' AND lc.id = ?';
+    $upcomingParams[] = (int) $classFilter;
+}
+$upcomingSql .= " GROUP BY lc.course_id, lcs.student_id, u.name, c.title ORDER BY exam_date ASC";
 $stmtUp = $pdo->prepare($upcomingSql);
 $stmtUp->execute($upcomingParams);
 $upcomingExamsList = $stmtUp->fetchAll(PDO::FETCH_ASSOC);
@@ -209,7 +286,7 @@ $stmt = $pdo->prepare(
         u.id student_id,
         u.name student_name,
         u.email student_email,
-        ce.exam_date,
+        MAX(lcs.exam_date) exam_date,
         (SELECT COUNT(*) FROM assignments a WHERE a.course_id=c.id) assignment_total,
         (SELECT COUNT(DISTINCT s.assignment_id)
          FROM submissions s
@@ -226,10 +303,13 @@ $stmt = $pdo->prepare(
          WHERE q_done.course_id=c.id AND q_done.is_published=1
            AND qa.student_id=u.id AND qa.submitted_at IS NOT NULL) quiz_completed,
         NULL quiz_average
-     FROM course_enrollments ce
-     JOIN courses c ON c.id=ce.course_id
-     JOIN users u ON u.id=ce.student_id
+     FROM learning_classes lc
+     JOIN learning_class_students lcs ON lcs.learning_class_id=lc.id
+     JOIN courses c ON c.id=lc.course_id
+     JOIN users u ON u.id=lcs.student_id
      $whereSql
+       " . ($whereSql ? " AND" : " WHERE") . " lc.status='active'
+     GROUP BY c.id, c.title, u.id, u.name, u.email
      ORDER BY c.title, u.name, u.id"
 );
 $stmt->execute($parameters);
@@ -241,13 +321,35 @@ $quizBestConditions = [
     'qa.score IS NOT NULL',
 ];
 $quizBestParameters = [];
-if ($_SESSION['user_role'] !== 'admin') {
-    $quizBestConditions[] = 'c.teacher_id=?';
-    $quizBestParameters[] = (int) $_SESSION['user_id'];
+if (!$isAdmin) {
+    $quizBestConditions[] = "EXISTS (
+        SELECT 1
+        FROM learning_classes access_lc
+        JOIN learning_class_students access_lcs ON access_lcs.learning_class_id=access_lc.id
+        WHERE access_lc.course_id=q.course_id
+          AND access_lcs.student_id=qa.student_id
+          AND access_lc.status='active'
+          AND ((c.teacher_id=? OR EXISTS (SELECT 1 FROM course_teachers ct WHERE ct.course_id=c.id AND ct.teacher_id=?))
+               OR access_lc.primary_teacher_id=?
+               OR EXISTS (SELECT 1 FROM learning_class_teachers access_lct WHERE access_lct.learning_class_id=access_lc.id AND access_lct.teacher_id=?))
+    )";
+    array_push($quizBestParameters, $actorId, $actorId, $actorId, $actorId);
 }
 if ($courseFilter) {
     $quizBestConditions[] = 'c.id=?';
     $quizBestParameters[] = (int) $courseFilter;
+}
+if ($classFilter) {
+    $quizBestConditions[] = "EXISTS (
+        SELECT 1
+        FROM learning_classes filter_lc
+        JOIN learning_class_students filter_lcs ON filter_lcs.learning_class_id=filter_lc.id
+        WHERE filter_lc.id=?
+          AND filter_lc.status='active'
+          AND filter_lc.course_id=q.course_id
+          AND filter_lcs.student_id=qa.student_id
+    )";
+    $quizBestParameters[] = (int) $classFilter;
 }
 $quizBestStmt = $pdo->prepare(
     "SELECT best.course_id, best.student_id, AVG(best.best_score) quiz_average
@@ -274,6 +376,7 @@ foreach ($progressRows as $row) {
     if (!isset($courses[$courseId])) {
         $courses[$courseId] = [
             'title' => (string) $row['course_title'],
+            'can_manage' => isset($manageableCourseIds[$courseId]),
             'students' => [],
         ];
     }
@@ -295,12 +398,14 @@ $page_title = 'Tiến độ Học viên';
 require_once '../includes/header.php';
 ?>
 <style>
-    .progress-toolbar{display:flex;align-items:end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:22px}
-    .progress-filter{display:flex;align-items:end;gap:10px;flex-wrap:wrap}
+    .progress-toolbar{display:grid;gap:18px;margin-bottom:22px}
+    .progress-toolbar-actions{display:flex;align-items:end;gap:12px;flex-wrap:wrap}
+    .progress-filter{display:grid;grid-template-columns:minmax(220px,1fr) minmax(300px,2fr) auto;align-items:end;gap:10px;flex:1 1 760px}
     .progress-filter label{display:grid;gap:6px;margin-bottom:0;color:var(--text-muted);font-size:13px}
-    .progress-filter select{min-width:240px}
+    .progress-filter select{min-width:0;width:100%}
     .progress-filter select,.progress-filter .btn{height:40px;min-height:40px;box-sizing:border-box}
     .progress-filter .btn{align-self:end;justify-content:center;padding:0 20px;white-space:nowrap;transform:none}
+    .progress-filter .is-disabled{opacity:.45;pointer-events:none;cursor:default}
     .course-progress{margin-bottom:22px}
     .course-progress-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px}
     .course-progress-heading h2{margin:0}
@@ -312,7 +417,9 @@ require_once '../includes/header.php';
     .average-score{font-size:18px;font-weight:800;color:var(--success);white-space:nowrap}
     .no-score{color:var(--text-muted)}
     @media(max-width:700px){
-        .progress-filter,.progress-filter label,.progress-filter select,.progress-filter .btn{width:100%}
+        .progress-toolbar-actions,.progress-filter{width:100%}
+        .progress-filter{grid-template-columns:1fr}
+        .progress-filter label,.progress-filter select,.progress-filter .btn{width:100%}
         .progress-filter .btn{transform:none}
     }
 </style>
@@ -323,7 +430,7 @@ require_once '../includes/header.php';
             <h2 style="margin:0 0 7px"><i class='bx bx-line-chart'></i> Tiến độ Học viên</h2>
             <p style="margin:0;color:var(--text-muted)">Theo dõi mức độ hoàn thành và điểm trung bình của từng học viên.</p>
         </div>
-        <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
+        <div class="progress-toolbar-actions">
             <a href="../preview_email.php?type=exam" target="_blank" class="btn btn-outline" style="height: 40px; border-color:var(--primary); color:var(--primary);">
                 <i class='bx bx-search-alt'></i> Xem trước mẫu Email
             </a>
@@ -335,7 +442,7 @@ require_once '../includes/header.php';
             <form method="GET" class="progress-filter">
                 <label>
                     Khóa học
-                    <select name="course_id" onchange="this.form.submit()">
+                    <select name="course_id" onchange="this.form.elements.class_id.value='';this.form.submit()">
                         <option value="">Tất cả khóa học</option>
                         <?php foreach ($availableCourses as $filterCourse): ?>
                             <option value="<?php echo (int) $filterCourse['id']; ?>" <?php echo (int) $courseFilter === (int) $filterCourse['id'] ? 'selected' : ''; ?>>
@@ -344,9 +451,18 @@ require_once '../includes/header.php';
                         <?php endforeach; ?>
                     </select>
                 </label>
-                <?php if ($courseFilter): ?>
-                    <a class="btn btn-outline" href="student_progress.php"><i class='bx bx-reset'></i> Xóa lọc</a>
-                <?php endif; ?>
+                <label>
+                    Lớp học
+                    <select name="class_id" onchange="this.form.submit()">
+                        <option value="">Tất cả lớp học</option>
+                        <?php foreach ($availableClasses as $filterClass): ?>
+                            <option value="<?php echo (int) $filterClass['id']; ?>" <?php echo (int) $classFilter === (int) $filterClass['id'] ? 'selected' : ''; ?>>
+                                <?php echo htmlspecialchars((string) $filterClass['course_title'] . ' — ' . (string) $filterClass['class_name'], ENT_QUOTES, 'UTF-8'); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <a class="btn btn-outline <?php echo $courseFilter || $classFilter ? '' : 'is-disabled'; ?>" href="student_progress.php" aria-disabled="<?php echo $courseFilter || $classFilter ? 'false' : 'true'; ?>"><i class='bx bx-reset'></i> Xóa lọc</a>
             </form>
         </div>
     </div>
@@ -355,8 +471,8 @@ require_once '../includes/header.php';
 <?php foreach ($courses as $courseId => $course): ?>
     <section class="box course-progress">
         <div class="course-progress-heading">
-            <h2><i class='bx bx-book-open'></i> <?php echo htmlspecialchars($course['title'], ENT_QUOTES, 'UTF-8'); ?></h2>
-            <span style="color:var(--text-muted)"><?php echo count($course['students']); ?> học viên</span>
+            <h2><i class='bx bx-book-open'></i> <?php echo htmlspecialchars($course['title'] . ($selectedClassName !== '' ? ' — ' . $selectedClassName : ''), ENT_QUOTES, 'UTF-8'); ?></h2>
+            <span style="color:var(--text-muted)"><?php echo count($course['students']); ?> học viên<?php echo $course['can_manage'] ? '' : ' · Chỉ xem'; ?></span>
         </div>
         <div class="table-responsive">
             <table>
@@ -378,7 +494,9 @@ require_once '../includes/header.php';
                                 <small style="display:block;color:var(--text-muted)"><?php echo htmlspecialchars((string) $student['student_email'], ENT_QUOTES, 'UTF-8'); ?></small>
                             </td>
                             <td>
+                                <?php if ($course['can_manage']): ?>
                                 <form method="post" style="display:flex; gap:6px; align-items:center; margin-bottom: 6px;">
+                                    <?php echo csrfField(); ?>
                                     <input type="hidden" name="action" value="set_exam_date">
                                     <input type="hidden" name="course_id" value="<?php echo $courseId; ?>">
                                     <input type="hidden" name="student_id" value="<?php echo $student['student_id']; ?>">
@@ -388,6 +506,7 @@ require_once '../includes/header.php';
                                 </form>
                                 <?php if ($student['exam_date'] && strtotime((string)$student['exam_date']) > time()): ?>
                                 <form method="post" style="display:flex; gap:6px; align-items:center;">
+                                    <?php echo csrfField(); ?>
                                     <input type="hidden" name="action" value="send_exam_reminder">
                                     <input type="hidden" name="course_id" value="<?php echo $courseId; ?>">
                                     <input type="hidden" name="student_id" value="<?php echo $student['student_id']; ?>">
@@ -395,6 +514,9 @@ require_once '../includes/header.php';
                                         <i class='bx bx-envelope'></i> Gửi nhắc nhở
                                     </button>
                                 </form>
+                                <?php endif; ?>
+                                <?php else: ?>
+                                    <span><?php echo $student['exam_date'] ? date('d/m/Y', strtotime((string) $student['exam_date'])) : 'Chưa đặt'; ?></span>
                                 <?php endif; ?>
                             </td>
                             <td>
@@ -448,6 +570,7 @@ require_once '../includes/header.php';
             <button type="button" onclick="document.getElementById('bulkReminderModal').style.display='none'" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:24px;">&times;</button>
         </div>
         <form method="POST" style="display:flex; flex-direction:column; overflow:hidden;">
+            <?php echo csrfField(); ?>
             <input type="hidden" name="action" value="bulk_send_exam_reminder">
             <div style="padding:20px; overflow-y:auto; flex:1;">
                 <p style="margin-top:0; color:var(--text-muted);">Danh sách học viên sắp thi trong 7 ngày tới (<?php echo count($upcomingExamsList); ?> học viên):</p>

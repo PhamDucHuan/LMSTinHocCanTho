@@ -2,6 +2,7 @@
 require_once '../includes/security.php';
 secureSessionStart();
 require_once '../config/database.php';
+require_once '../includes/authorization.php';
 
 if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_role'] ?? '', ['teacher', 'administrative_staff', 'admin'], true)) {
     header('Location: ../index.php');
@@ -27,11 +28,7 @@ if (!$assignmentId || !in_array($direction, ['up', 'down'], true)) {
     exit;
 }
 
-$lookup = $_SESSION['user_role'] === 'admin'
-    ? $pdo->prepare('SELECT id, course_id, type FROM assignments WHERE id = ?')
-    : $pdo->prepare('SELECT id, course_id, type FROM assignments WHERE id = ? AND teacher_id = ?');
-$lookup->execute($_SESSION['user_role'] === 'admin' ? [$assignmentId] : [$assignmentId, $_SESSION['user_id']]);
-$assignment = $lookup->fetch();
+$assignment = authorizationFindManageableAssignment($pdo, (int) $assignmentId, (string) $_SESSION['user_role'], (int) $_SESSION['user_id']);
 if (!$assignment) {
     $_SESSION['error'] = 'Không tìm thấy bài tập hoặc bạn không có quyền sắp xếp.';
     header('Location: ' . $redirect);
@@ -39,11 +36,11 @@ if (!$assignment) {
 }
 
 $courseCondition = $assignment['course_id'] === null ? 'course_id IS NULL' : 'course_id = ?';
-$ownerCondition = $_SESSION['user_role'] === 'admin' ? '' : ' AND teacher_id = ?';
+$ownerCondition = $_SESSION['user_role'] === 'admin' || $assignment['course_id'] !== null ? '' : ' AND teacher_id = ?';
 $params = [];
 if ($assignment['course_id'] !== null) $params[] = (int) $assignment['course_id'];
 $params[] = (string) $assignment['type'];
-if ($_SESSION['user_role'] !== 'admin') $params[] = (int) $_SESSION['user_id'];
+if ($ownerCondition !== '') $params[] = (int) $_SESSION['user_id'];
 
 try {
     $pdo->beginTransaction();

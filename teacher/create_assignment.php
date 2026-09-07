@@ -6,6 +6,7 @@ require_once '../includes/drive_helper.php';
 require_once '../includes/notifications.php';
 require_once '../includes/audit.php';
 require_once '../includes/friendly_urls.php';
+require_once '../includes/authorization.php';
 
 if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_role'], ['teacher', 'administrative_staff', 'admin'], true)) {
     header('Location: ../index.php');
@@ -21,11 +22,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $type = $_POST['type'];
     $duration_minutes = max(1, min(1440, (int) ($_POST['duration_minutes'] ?? 90)));
     $course_id = $_POST['course_id'];
-    $courseCheck = $_SESSION['user_role'] === 'admin'
-        ? $pdo->prepare("SELECT id FROM courses WHERE id = ?")
-        : $pdo->prepare("SELECT id FROM courses WHERE id = ? AND teacher_id = ?");
-    $courseCheck->execute($_SESSION['user_role'] === 'admin' ? [$course_id] : [$course_id, $_SESSION['user_id']]);
-    if (!$courseCheck->fetch()) {
+    if (!authorizationUserCanManageCourse($pdo, (int) $course_id, (string) $_SESSION['user_role'], (int) $_SESSION['user_id'])) {
         $error = 'Khóa học không hợp lệ.';
     }
     
@@ -122,7 +119,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt = $pdo->prepare("INSERT INTO assignments (teacher_id, title, slug, description, prompt_file_drive_id, prompt_file_name, solution_file_drive_id, solution_file_name, due_date, category, type, duration_minutes, attachments, course_id, module_settings, priority_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
         if ($stmt->execute([$_SESSION['user_id'], $title, uniqueFriendlySlug($pdo, 'assignments', $title), $description, $prompt_file_drive_id, $prompt_file_name, $solution_file_drive_id, $solution_file_name, $due_date, $category, $type, $duration_minutes, $attachments_json, $course_id, $module_settings_json, $priorityOrder])) {
             $assignmentId = (int) $pdo->lastInsertId();
-            $studentStmt = $pdo->prepare('SELECT student_id FROM course_enrollments WHERE course_id = ?');
+            $studentStmt = $pdo->prepare("SELECT DISTINCT lcs.student_id FROM learning_classes lc JOIN learning_class_students lcs ON lcs.learning_class_id=lc.id WHERE lc.course_id=? AND lc.status='active'");
             $studentStmt->execute([(int) $course_id]);
             foreach ($studentStmt->fetchAll(PDO::FETCH_COLUMN) as $enrolledStudentId) {
                 createNotification(
@@ -153,8 +150,8 @@ if ($_SESSION['user_role'] === 'admin') {
     $stmt = $pdo->prepare("SELECT * FROM courses ORDER BY created_at DESC");
     $stmt->execute();
 } else {
-    $stmt = $pdo->prepare("SELECT * FROM courses WHERE teacher_id = ? ORDER BY created_at DESC");
-    $stmt->execute([$_SESSION['user_id']]);
+    $stmt = $pdo->prepare("SELECT * FROM courses c WHERE c.teacher_id=? OR EXISTS (SELECT 1 FROM course_teachers ct WHERE ct.course_id=c.id AND ct.teacher_id=?) ORDER BY c.created_at DESC");
+    $stmt->execute([$_SESSION['user_id'], $_SESSION['user_id']]);
 }
 $courses = $stmt->fetchAll();
 

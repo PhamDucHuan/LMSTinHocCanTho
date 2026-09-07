@@ -13,8 +13,8 @@ if ($_SESSION['user_role'] === 'admin') {
     $stmt = $pdo->prepare("SELECT a.*, c.title as course_title FROM assignments a LEFT JOIN courses c ON a.course_id = c.id ORDER BY a.priority_order, a.created_at, a.id");
     $stmt->execute();
 } else {
-    $stmt = $pdo->prepare("SELECT a.*, c.title as course_title FROM assignments a LEFT JOIN courses c ON a.course_id = c.id WHERE a.teacher_id = ? ORDER BY a.priority_order, a.created_at, a.id");
-    $stmt->execute([$_SESSION['user_id']]);
+    $stmt = $pdo->prepare("SELECT a.*, c.title as course_title FROM assignments a LEFT JOIN courses c ON a.course_id = c.id WHERE a.teacher_id=? OR (a.course_id IS NOT NULL AND EXISTS (SELECT 1 FROM course_teachers ct WHERE ct.course_id=a.course_id AND ct.teacher_id=?)) ORDER BY a.priority_order, a.created_at, a.id");
+    $stmt->execute([$_SESSION['user_id'], $_SESSION['user_id']]);
 }
 $assignments = $stmt->fetchAll();
 

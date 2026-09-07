@@ -76,7 +76,7 @@ function collectSystemHealth(PDO $pdo, string $projectRoot): array
         $checks[] = systemHealthItem('Cơ sở dữ liệu', 'error', 'Không thể thực hiện truy vấn kiểm tra', 'Xem error log máy chủ để biết chi tiết.');
     }
 
-    $tables = ['users', 'courses', 'course_enrollments', 'assignments', 'submissions', 'quizzes', 'grading_jobs'];
+    $tables = ['users', 'courses', 'course_teachers', 'course_materials', 'learning_classes', 'learning_class_teachers', 'learning_class_students', 'assignments', 'submissions', 'quizzes', 'grading_jobs'];
     $missingTables = [];
     foreach ($tables as $table) {
         try {

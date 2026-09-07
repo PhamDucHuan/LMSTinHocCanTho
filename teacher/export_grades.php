@@ -22,7 +22,8 @@ if (!$assignmentId && !$courseId) {
 $conditions = [];
 $params = [];
 if ($_SESSION['user_role'] !== 'admin') {
-    $conditions[] = 'c.teacher_id = ?';
+    $conditions[] = '(c.teacher_id=? OR EXISTS (SELECT 1 FROM course_teachers ct WHERE ct.course_id=c.id AND ct.teacher_id=?))';
+    $params[] = (int)$_SESSION['user_id'];
     $params[] = (int)$_SESSION['user_id'];
 }
 if ($assignmentId) { $conditions[] = 'a.id = ?'; $params[] = $assignmentId; }

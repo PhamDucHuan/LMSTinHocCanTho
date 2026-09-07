@@ -3,6 +3,7 @@ require_once '../includes/security.php';
 secureSessionStart();
 require_once '../config/database.php';
 require_once '../includes/friendly_urls.php';
+require_once '../includes/authorization.php';
 /** @var PDO $pdo */
 if (!isset($_SESSION['user_id']) || $_SESSION['user_role'] !== 'student') {
     header('Location: ../index.php'); exit;
@@ -17,6 +18,10 @@ $stmt = $pdo->prepare('SELECT q.*,c.title course_title,c.slug course_slug FROM q
 $stmt->execute([$quizId]);
 $quiz = $stmt->fetch();
 if(!$quiz){http_response_code(404);exit('Bài trắc nghiệm không tồn tại hoặc chưa được mở.');}
+if (!authorizationStudentIsEnrolled($pdo, $studentId, (int) $quiz['course_id'])) {
+    http_response_code(403);
+    exit('Bạn chưa được phân vào lớp học của khóa này.');
+}
 if (!empty($quiz['available_from']) && strtotime($quiz['available_from']) > time()) {
     http_response_code(403);
     exit('Bài trắc nghiệm chưa đến thời gian mở.');

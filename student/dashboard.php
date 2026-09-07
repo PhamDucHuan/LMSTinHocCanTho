@@ -3,7 +3,6 @@ require_once '../includes/security.php';
 secureSessionStart();
 require_once '../config/database.php';
 require_once '../includes/friendly_urls.php';
-require_once '../includes/notifications.php';
 /** @var PDO $pdo */
 ensureFriendlyUrls($pdo);
 /** @var PDO $pdo Kết nối cơ sở dữ liệu được khởi tạo trong config/database.php. */
@@ -23,66 +22,13 @@ $shortCourseDescription = static function (?string $description, int $limit = 14
         : $description;
 };
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'request_enrollment' && !$is_staff) {
-    verifyCsrfToken();
-    $requestedCourseId = filter_input(INPUT_POST, 'course_id', FILTER_VALIDATE_INT);
-    if (!$requestedCourseId) {
-        $_SESSION['error'] = 'Khóa học không hợp lệ.';
-    } else {
-        $courseCheck = $pdo->prepare("
-            SELECT c.id, c.title, c.teacher_id
-            FROM courses c
-            WHERE c.id = ?
-              AND NOT EXISTS (
-                  SELECT 1 FROM course_enrollments ce
-                  WHERE ce.course_id = c.id AND ce.student_id = ?
-              )
-        ");
-        $courseCheck->execute([$requestedCourseId, $student_id]);
-        $requestedCourse = $courseCheck->fetch();
-        if (!$requestedCourse) {
-            $_SESSION['error'] = 'Khóa học không tồn tại hoặc bạn đã được ghi danh.';
-        } else {
-            $requestStmt = $pdo->prepare("
-                INSERT INTO course_enrollment_requests
-                    (course_id, student_id, status, requested_at, reviewed_at, reviewed_by)
-                VALUES (?, ?, 'pending', NOW(), NULL, NULL)
-                ON DUPLICATE KEY UPDATE
-                    status = 'pending',
-                    requested_at = NOW(),
-                    reviewed_at = NULL,
-                    reviewed_by = NULL
-            ");
-            $requestStmt->execute([$requestedCourseId, $student_id]);
-            $recipientStmt = $pdo->prepare(
-                "SELECT id FROM users WHERE id = ? OR role = 'admin'"
-            );
-            $recipientStmt->execute([(int) $requestedCourse['teacher_id']]);
-            foreach (array_unique(array_map('intval', $recipientStmt->fetchAll(PDO::FETCH_COLUMN))) as $recipientId) {
-                createNotification(
-                    $pdo,
-                    $recipientId,
-                    'enrollment_requested',
-                    'Có yêu cầu ghi danh mới',
-                    ($_SESSION['user_name'] ?? 'Một học viên') . " muốn tham gia khóa “{$requestedCourse['title']}”.",
-                    '../teacher/course_detail.php?id=' . (int) $requestedCourseId,
-                    ['course_id' => (int) $requestedCourseId, 'student_id' => (int) $student_id]
-                );
-            }
-            $_SESSION['success'] = 'Đã gửi yêu cầu ghi danh. Vui lòng chờ giáo viên hoặc admin duyệt.';
-        }
-    }
-    header('Location: dashboard.php');
-    exit;
-}
-
 // --- THỐNG KÊ ---
 $statsStmt = $pdo->prepare("SELECT
-    (SELECT COUNT(*) FROM course_enrollments WHERE student_id=?) AS courses,
     (SELECT COUNT(*) FROM submissions WHERE student_id=?) AS completed,
     (SELECT AVG(score) FROM submissions WHERE student_id=? AND score IS NOT NULL) AS avg_score");
-$statsStmt->execute([$student_id, $student_id, $student_id]);
+$statsStmt->execute([$student_id, $student_id]);
 $stats = $statsStmt->fetch();
+$stats['courses'] = $is_staff ? (int) $pdo->query('SELECT COUNT(*) FROM courses')->fetchColumn() : 0;
 if ($stats['avg_score'] !== null) {
     $stats['avg_score'] = round($stats['avg_score'], 1);
 } else {
@@ -92,7 +38,7 @@ if ($stats['avg_score'] !== null) {
 $total_assigned = $pdo->prepare("
     SELECT COUNT(a.id) 
     FROM assignments a
-    WHERE a.course_id IN (SELECT course_id FROM course_enrollments WHERE student_id = ?) 
+    WHERE EXISTS (SELECT 1 FROM learning_classes lc JOIN learning_class_students lcs ON lcs.learning_class_id=lc.id WHERE lc.course_id=a.course_id AND lc.status='active' AND lcs.student_id=?)
        OR a.course_id IS NULL
 ");
 $total_assigned->execute([$student_id]);
@@ -125,8 +71,8 @@ $query = "
 ";
 $queryParams = ['submission_uid' => $student_id];
 if (!$is_staff) {
-    $query .= " WHERE a.course_id IN (SELECT course_id FROM course_enrollments WHERE student_id = :enrollment_uid) OR a.course_id IS NULL";
-    $queryParams['enrollment_uid'] = $student_id;
+    $query .= " WHERE EXISTS (SELECT 1 FROM learning_classes lc JOIN learning_class_students lcs ON lcs.learning_class_id=lc.id WHERE lc.course_id=a.course_id AND lc.status='active' AND lcs.student_id=:class_uid) OR a.course_id IS NULL";
+    $queryParams['class_uid'] = $student_id;
 }
 $query .= " ORDER BY a.priority_order, a.created_at, a.id";
 
@@ -144,38 +90,29 @@ if ($is_staff) {
         LEFT JOIN (SELECT course_id,COUNT(*) quiz_count FROM quizzes WHERE is_published=1 GROUP BY course_id) qc ON qc.course_id=c.id
         ORDER BY c.created_at DESC
     ");
+    $dashboardCourses = $courseListStmt->fetchAll();
 } else {
-    $courseListStmt = $pdo->prepare("
-        SELECT c.id, c.title, c.slug, c.description, ce.exam_date,
-               COALESCE(ac.assignment_count,0) AS assignment_count,
-               COALESCE(qc.quiz_count,0) AS quiz_count
-        FROM courses c
-        JOIN course_enrollments ce ON ce.course_id = c.id AND ce.student_id = ?
-        LEFT JOIN (SELECT course_id,COUNT(*) assignment_count FROM assignments WHERE course_id IS NOT NULL GROUP BY course_id) ac ON ac.course_id=c.id
-        LEFT JOIN (SELECT course_id,COUNT(*) quiz_count FROM quizzes WHERE is_published=1 GROUP BY course_id) qc ON qc.course_id=c.id
-        ORDER BY ce.enrolled_at DESC
-    ");
-    $courseListStmt->execute([$student_id]);
+    $dashboardCourses = [];
 }
-$dashboardCourses = $courseListStmt->fetchAll();
 $generalAssignmentCount = (int) $pdo->query("SELECT COUNT(*) FROM assignments WHERE course_id IS NULL")->fetchColumn();
-
-$availableCourses = [];
+$studentClasses = [];
 if (!$is_staff) {
-    $availableCourseStmt = $pdo->prepare("
-        SELECT c.id, c.title, c.slug, c.description, u.name AS teacher_name, er.status AS request_status
-        FROM courses c
-        JOIN users u ON u.id = c.teacher_id
-        LEFT JOIN course_enrollment_requests er
-            ON er.course_id = c.id AND er.student_id = ?
-        WHERE NOT EXISTS (
-            SELECT 1 FROM course_enrollments ce
-            WHERE ce.course_id = c.id AND ce.student_id = ?
-        )
-        ORDER BY c.created_at DESC
-    ");
-    $availableCourseStmt->execute([$student_id, $student_id]);
-    $availableCourses = $availableCourseStmt->fetchAll();
+    $classStmt = $pdo->prepare(
+        "SELECT lc.id, lc.class_name, lc.notes, lcs.exam_date,
+                c.id AS course_id, c.title AS course_title, c.slug AS course_slug, c.description AS course_description,
+                COALESCE((SELECT GROUP_CONCAT(t.name ORDER BY t.name SEPARATOR ', ') FROM learning_class_teachers lct JOIN users t ON t.id=lct.teacher_id WHERE lct.learning_class_id=lc.id), primary_teacher.name) AS teacher_names,
+                (SELECT COUNT(*) FROM assignments a WHERE a.course_id=c.id) AS assignment_count,
+                (SELECT COUNT(*) FROM quizzes q WHERE q.course_id=c.id AND q.is_published=1) AS quiz_count,
+                (SELECT COUNT(*) FROM course_materials cm WHERE cm.course_id=c.id) AS material_count
+         FROM learning_classes lc
+         JOIN learning_class_students lcs ON lcs.learning_class_id=lc.id AND lcs.student_id=?
+         JOIN courses c ON c.id=lc.course_id
+         LEFT JOIN users primary_teacher ON primary_teacher.id=lc.primary_teacher_id
+         WHERE lc.status='active'
+         ORDER BY lc.updated_at DESC, lc.class_name"
+    );
+    $classStmt->execute([$student_id]);
+    $studentClasses = $classStmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
 $page_title = "Tổng quan Học tập";
@@ -216,8 +153,8 @@ require_once '../includes/header.php';
 <div class="stats-grid">
     <div class="stat-card">
         <i class='bx bx-book-reader stat-icon' style="color: #6366f1;"></i>
-        <h3 class="stat-number"><?php echo $stats['courses']; ?></h3>
-        <div class="stat-label">Khóa học tham gia</div>
+        <h3 class="stat-number"><?php echo $is_staff ? $stats['courses'] : count($studentClasses); ?></h3>
+        <div class="stat-label"><?php echo $is_staff ? 'Khóa học tham gia' : 'Lớp học đang tham gia'; ?></div>
     </div>
     <div class="stat-card">
         <i class='bx bx-check-circle stat-icon' style="color: #10b981;"></i>
@@ -251,82 +188,48 @@ document.addEventListener("DOMContentLoaded", function() {
 </script>
 
 <div class="course-section-title" style="margin-top:30px;padding:0 0 12px;border-bottom:1px solid rgba(255,255,255,.12);">
-    <h2><i class='bx bx-book-open' style="color:var(--primary);"></i> Khóa học đã đăng ký</h2>
+    <h2><i class='bx <?php echo $is_staff ? 'bx-book-open' : 'bx-chalkboard'; ?>' style="color:var(--primary);"></i> <?php echo $is_staff ? 'Danh sách khóa học' : 'Lớp học của tôi'; ?></h2>
 </div>
 
 <div class="dashboard-course-grid">
-    <?php foreach ($dashboardCourses as $course): ?>
-        <div class="dashboard-course-card">
-            <i class='bx bx-book-bookmark'></i>
-            <h3><?php echo htmlspecialchars($course['title']); ?></h3>
-            <p><?php echo htmlspecialchars($shortCourseDescription($course['description'] ?? '')); ?></p>
-            <div class="dashboard-course-count"><i class='bx bx-task'></i> <?php echo (int) $course['assignment_count']; ?> bài tập / bài thi</div>
-            <?php if (!$is_staff): ?><div class="dashboard-course-count"><i class='bx bx-list-check'></i> <?php echo (int) $course['quiz_count']; ?> bài trắc nghiệm</div><?php endif; ?>
-            
-            <?php 
-            if (!$is_staff && !empty($course['exam_date'])) {
-                $daysLeft = ceil((strtotime((string)$course['exam_date']) - time()) / 86400);
-                $examDateStr = date('d/m/Y', strtotime((string)$course['exam_date']));
-                if ($daysLeft > 0) {
-                    echo "<div style='background:rgba(244,63,94,0.1); border:1px solid rgba(244,63,94,0.3); border-radius:8px; padding:8px 12px; margin-bottom:15px; color:#fb7185; font-size:13px;'><strong><i class='bx bx-calendar-event'></i> Ngày thi: $examDateStr</strong><br>Còn $daysLeft ngày để ôn tập!</div>";
-                } elseif ($daysLeft == 0) {
-                    echo "<div style='background:rgba(244,63,94,0.2); border:1px solid rgba(244,63,94,0.5); border-radius:8px; padding:8px 12px; margin-bottom:15px; color:#fb7185; font-size:13px;'><strong><i class='bx bx-alarm-exclamation'></i> HÔM NAY LÀ NGÀY THI!</strong><br>Chúc bạn làm bài tốt!</div>";
-                } else {
-                    echo "<div style='background:rgba(16,185,129,0.1); border-radius:8px; padding:8px 12px; margin-bottom:15px; color:#6ee7b7; font-size:13px;'><strong><i class='bx bx-calendar-check'></i> Đã thi: $examDateStr</strong></div>";
-                }
-            } 
-            ?>
-            <div style="display:flex;gap:9px;flex-wrap:wrap;margin-top:auto;">
-                <a href="<?php echo htmlspecialchars(friendlyUrl('assignments.php','course',$course['slug'])); ?>" class="btn btn-primary" style="flex:1;">Xem bài tập</a>
-                <?php if (!$is_staff): ?><a href="<?php echo htmlspecialchars(friendlyUrl('quizzes.php','course',$course['slug'])); ?>" class="btn btn-outline" style="flex:1;"><i class='bx bx-list-check'></i> Trắc nghiệm</a><?php endif; ?>
+    <?php if (!$is_staff): ?>
+        <?php foreach ($studentClasses as $class): ?>
+            <div class="dashboard-course-card">
+                <i class='bx bx-chalkboard'></i>
+                <h3><?php echo htmlspecialchars($class['class_name']); ?></h3>
+                <div class="dashboard-course-count"><i class='bx bx-book-open'></i> <?php echo htmlspecialchars($class['course_title']); ?></div>
+                <p><i class='bx bx-user-voice'></i> <?php echo htmlspecialchars($class['teacher_names'] ?: 'Chưa phân công giáo viên'); ?></p>
+                <div class="dashboard-course-count"><i class='bx bx-book-content'></i> <?php echo (int) $class['material_count']; ?> học liệu</div>
+                <div class="dashboard-course-count"><i class='bx bx-task'></i> <?php echo (int) $class['assignment_count']; ?> bài tập / bài thi</div>
+                <div class="dashboard-course-count"><i class='bx bx-list-check'></i> <?php echo (int) $class['quiz_count']; ?> bài trắc nghiệm</div>
+                <?php if (!empty($class['exam_date'])): ?><div class="dashboard-course-count"><i class='bx bx-calendar-check'></i> Ngày thi của bạn: <?php echo date('d/m/Y', strtotime((string) $class['exam_date'])); ?></div><?php endif; ?>
+                <div style="display:flex;gap:9px;flex-wrap:wrap;margin-top:auto;">
+                    <a href="<?php echo htmlspecialchars(friendlyUrl('course.php', 'course', $class['course_slug'])); ?>" class="btn btn-primary" style="flex:1 1 100%;"><i class='bx bx-book-content'></i> Vào lớp &amp; xem học liệu</a>
+                    <a href="<?php echo htmlspecialchars(friendlyUrl('assignments.php', 'course', $class['course_slug'])); ?>" class="btn btn-primary" style="flex:1;">Bài tập</a>
+                    <a href="<?php echo htmlspecialchars(friendlyUrl('quizzes.php', 'course', $class['course_slug'])); ?>" class="btn btn-outline" style="flex:1;"><i class='bx bx-list-check'></i> Trắc nghiệm</a>
+                </div>
             </div>
-        </div>
-    <?php endforeach; ?>
+        <?php endforeach; ?>
+    <?php else: ?>
+        <?php foreach ($dashboardCourses as $course): ?>
+            <div class="dashboard-course-card">
+                <i class='bx bx-book-bookmark'></i><h3><?php echo htmlspecialchars($course['title']); ?></h3>
+                <p><?php echo htmlspecialchars($shortCourseDescription($course['description'] ?? '')); ?></p>
+                <div class="dashboard-course-count"><i class='bx bx-task'></i> <?php echo (int) $course['assignment_count']; ?> bài tập / bài thi</div>
+                <a href="<?php echo htmlspecialchars(friendlyUrl('assignments.php', 'course', $course['slug'])); ?>" class="btn btn-primary">Xem bài tập</a>
+            </div>
+        <?php endforeach; ?>
+    <?php endif; ?>
 
     <?php if ($generalAssignmentCount > 0): ?>
-        <div class="dashboard-course-card">
-            <i class='bx bx-folder-open'></i>
-            <h3>Bài tập chung</h3>
-            <p>Các bài tập không thuộc một khóa học cụ thể.</p>
-            <div class="dashboard-course-count"><i class='bx bx-task'></i> <?php echo $generalAssignmentCount; ?> bài tập / bài thi</div>
-            <a href="assignments.php?course_id=0" class="btn btn-primary">Xem bài tập</a>
-        </div>
+        <div class="dashboard-course-card"><i class='bx bx-folder-open'></i><h3>Bài tập chung</h3><p>Các bài tập không thuộc một khóa học cụ thể.</p><div class="dashboard-course-count"><i class='bx bx-task'></i> <?php echo $generalAssignmentCount; ?> bài tập / bài thi</div><a href="assignments.php?course_id=0" class="btn btn-primary">Xem bài tập</a></div>
     <?php endif; ?>
 </div>
 
-<?php if (!$dashboardCourses && $generalAssignmentCount === 0): ?>
+<?php if ((!$is_staff && !$studentClasses && $generalAssignmentCount === 0) || ($is_staff && !$dashboardCourses && $generalAssignmentCount === 0)): ?>
     <div class="box" style="margin-top:20px;text-align:center;color:var(--text-muted);">
-        Bạn chưa được ghi danh vào khóa học nào.
+        <?php echo $is_staff ? 'Chưa có khóa học nào.' : 'Bạn chưa được xếp vào lớp nào. Vui lòng liên hệ giáo viên hoặc quản trị viên.'; ?>
     </div>
-<?php endif; ?>
-
-<?php if (!$is_staff): ?>
-    <div class="course-section-title" style="margin-top:42px;padding:0 0 12px;border-bottom:1px solid rgba(255,255,255,.12);">
-        <h2><i class='bx bx-grid-alt' style="color:var(--primary);"></i> Khóa học có thể đăng ký</h2>
-    </div>
-
-    <?php if ($availableCourses): ?>
-        <div class="dashboard-course-grid" style="margin-bottom:35px;">
-            <?php foreach ($availableCourses as $course): ?>
-                <div class="dashboard-course-card">
-                    <i class='bx bx-book-add'></i>
-                    <h3><?php echo htmlspecialchars($course['title']); ?></h3>
-                    <div style="color:#7dd3fc;font-size:13px;margin-bottom:8px;"><i class='bx bx-user'></i> <?php echo htmlspecialchars($course['teacher_name']); ?></div>
-                    <p><?php echo htmlspecialchars($shortCourseDescription($course['description'] ?? '')); ?></p>
-                    <?php if (($course['request_status'] ?? '') === 'pending'): ?>
-                        <div style="color:#fbbf24;font-size:13px;margin-bottom:10px;"><i class='bx bx-time-five'></i> Yêu cầu đang chờ duyệt</div>
-                    <?php endif; ?>
-                    <a href="<?php echo htmlspecialchars(friendlyUrl('course.php','course',$course['slug'])); ?>" class="btn btn-primary" style="text-align:center;">
-                        <i class='bx bx-show'></i> Xem thông tin khóa học
-                    </a>
-                </div>
-            <?php endforeach; ?>
-        </div>
-    <?php else: ?>
-        <div class="box" style="margin-top:20px;text-align:center;color:var(--text-muted);">
-            Hiện không có khóa học mới để đăng ký.
-        </div>
-    <?php endif; ?>
 <?php endif; ?>
 
 <div class="charts-grid">

@@ -862,8 +862,11 @@ $unreadNotifications ??= 0;
                         ['url' => '../teacher/student_progress.php', 'icon' => 'bx-line-chart', 'label' => 'Tiến độ Học viên', 'match' => ['teacher/student_progress.php']],
                         ['url' => '../teacher/question_bank.php', 'icon' => 'bx-library', 'label' => 'Ngân hàng câu hỏi', 'match' => ['teacher/question_bank.php']],
                     ]],
+                    ['id' => 'class-management', 'label' => 'Quản lý lớp', 'icon' => 'bx-group', 'items' => [
+                        ['url' => '../admin/classes.php', 'icon' => 'bx-chalkboard', 'label' => 'Danh sách Lớp học', 'match' => ['admin/classes.php']],
+                    ]],
                     ['id' => 'teaching-schedule', 'label' => 'Lịch dạy', 'icon' => 'bx-calendar-event', 'items' => [
-                        ['url' => '../admin/teaching_schedule.php?scope=all', 'icon' => 'bx-calendar-event', 'label' => 'Xếp lớp & Lịch dạy', 'match' => ['admin/teaching_schedule.php']],
+                        ['url' => '../admin/teaching_schedule.php?scope=all', 'icon' => 'bx-calendar-event', 'label' => 'Lịch dạy tổng', 'match' => ['admin/teaching_schedule.php']],
                         ['url' => '../admin/teaching_schedule.php?scope=mine', 'icon' => 'bx-calendar-check', 'label' => 'Lịch dạy của tôi', 'match' => ['admin/teaching_schedule.php']],
                         ['url' => '../admin/teacher_schedules.php', 'icon' => 'bx-group', 'label' => 'Lịch của giáo viên', 'match' => ['admin/teacher_schedules.php']],
                     ]],
@@ -892,6 +895,9 @@ $unreadNotifications ??= 0;
                         ['url' => '../teacher/assignments.php', 'icon' => 'bx-book-content', 'label' => 'Danh sách Bài tập', 'match' => ['teacher/assignments.php', 'teacher/edit_assignment.php']],
                         ['url' => '../teacher/create_assignment.php', 'icon' => 'bx-plus-circle', 'label' => 'Giao Bài Mới', 'match' => ['teacher/create_assignment.php']],
                         ['url' => '../teacher/question_bank.php', 'icon' => 'bx-library', 'label' => 'Ngân hàng câu hỏi', 'match' => ['teacher/question_bank.php']],
+                    ]],
+                    ['id' => 'teacher-class-management', 'label' => 'Quản lý lớp', 'icon' => 'bx-group', 'items' => [
+                        ['url' => '../admin/classes.php', 'icon' => 'bx-chalkboard', 'label' => 'Danh sách Lớp học', 'match' => ['admin/classes.php']],
                     ]],
                     ['id' => 'teacher-schedule', 'label' => 'Lịch dạy', 'icon' => 'bx-calendar-event', 'items' => [
                         ['url' => '../admin/teaching_schedule.php', 'icon' => 'bx-calendar-check', 'label' => 'Lịch dạy của tôi', 'match' => ['admin/teaching_schedule.php']],
@@ -922,8 +928,11 @@ $unreadNotifications ??= 0;
                     ['id' => 'student-overview', 'label' => 'Tổng quan', 'icon' => 'bx-home-alt', 'items' => [
                         ['url' => '../student/dashboard.php', 'icon' => 'bx-home-alt', 'label' => 'Tổng quan Học tập', 'match' => ['student/dashboard.php']],
                     ]],
+                    ['id' => 'student-classes', 'label' => 'Lớp học', 'icon' => 'bx-group', 'items' => [
+                        ['url' => '../student/classes.php', 'icon' => 'bx-chalkboard', 'label' => 'Lớp học của tôi', 'match' => ['student/classes.php']],
+                    ]],
                     ['id' => 'student-learning', 'label' => 'Học tập & làm bài', 'icon' => 'bx-book-open', 'items' => [
-                        ['url' => '../student/assignments.php', 'icon' => 'bx-book-open', 'label' => 'Bài tập theo Khóa học', 'match' => ['student/assignments.php', 'student/course.php', 'student/assignment.php', 'student/outstanding_submissions.php']],
+                        ['url' => '../student/assignments.php', 'icon' => 'bx-book-open', 'label' => 'Bài tập của tôi', 'match' => ['student/assignments.php', 'student/course.php', 'student/assignment.php', 'student/outstanding_submissions.php']],
                         ['url' => '../student/quizzes.php', 'icon' => 'bx-list-check', 'label' => 'Làm trắc nghiệm', 'match' => ['student/quizzes.php', 'student/quiz.php']],
                     ]],
                     ['id' => 'student-results', 'label' => 'Kết quả cá nhân', 'icon' => 'bx-trophy', 'items' => [
