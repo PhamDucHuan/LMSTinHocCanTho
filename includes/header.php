@@ -872,6 +872,7 @@ $unreadNotifications ??= 0;
                     ]],
                     ['id' => 'monitoring', 'label' => 'Theo dõi & AI', 'icon' => 'bx-line-chart', 'items' => [
                         ['url' => '../admin/ai_grading.php', 'icon' => 'bx-bot', 'label' => 'Giám sát chấm AI', 'match' => ['admin/ai_grading.php']],
+                        ['url' => '../admin/question_reports.php', 'icon' => 'bx-error-circle', 'label' => 'Báo cáo câu hỏi', 'match' => ['admin/question_reports.php']],
                         ['url' => '../admin/audit_logs.php', 'icon' => 'bx-history', 'label' => 'Nhật ký hoạt động', 'match' => ['admin/audit_logs.php']],
                         ['url' => '../admin/login_logs.php', 'icon' => 'bx-log-in-circle', 'label' => 'Nhật ký đăng nhập', 'match' => ['admin/login_logs.php']],
                         ['url' => '../admin/online_users.php', 'icon' => 'bx-radio-circle-marked', 'label' => 'Người đang online', 'match' => ['admin/online_users.php']],

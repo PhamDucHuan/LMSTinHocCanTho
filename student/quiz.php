@@ -95,6 +95,48 @@ if($storedQuestionOrder){
     $questions=$orderedQuestions;
 }
 
+if($_SERVER['REQUEST_METHOD']==='POST' && ($_POST['action']??'')==='report_question'){
+    verifyCsrfToken();
+    header('Content-Type: application/json; charset=utf-8');
+    try{
+        $reportedQuestionId=filter_input(INPUT_POST,'question_id',FILTER_VALIDATE_INT);
+        $reportReasons=[
+            'answer_wrong'=>'Đáp án có thể không đúng',
+            'content_unclear'=>'Nội dung câu hỏi chưa rõ',
+            'typo'=>'Lỗi chính tả hoặc dữ liệu',
+            'image_error'=>'Hình ảnh/định dạng bị lỗi',
+            'other'=>'Vấn đề khác',
+        ];
+        $reason=(string)($_POST['reason']??'');
+        $details=trim((string)($_POST['details']??''));
+        if(!$reportedQuestionId || !isset($reportReasons[$reason])) throw new RuntimeException('Lý do báo cáo không hợp lệ.');
+        if(mb_strlen($details,'UTF-8')>2000) throw new RuntimeException('Nội dung báo cáo không được dài quá 2.000 ký tự.');
+        $reportedQuestion=null;
+        foreach($questions as $question){if((int)$question['id']===$reportedQuestionId){$reportedQuestion=$question;break;}}
+        if(!$reportedQuestion) throw new RuntimeException('Câu hỏi này không thuộc lượt làm hiện tại.');
+        $snapshot=[
+            'question_text'=>$reportedQuestion['question_text'],
+            'option_a'=>$reportedQuestion['option_a'],
+            'option_b'=>$reportedQuestion['option_b'],
+            'option_c'=>$reportedQuestion['option_c'],
+            'option_d'=>$reportedQuestion['option_d'],
+            'correct_option'=>$reportedQuestion['correct_option'],
+            'section_title'=>$reportedQuestion['section_title'],
+        ];
+        $stmt=$pdo->prepare(
+            "INSERT INTO quiz_question_reports (question_id,quiz_id,attempt_id,student_id,reason,details,question_snapshot,status)
+             VALUES (?,?,?,?,?,?,?,'open')
+             ON DUPLICATE KEY UPDATE reason=VALUES(reason),details=VALUES(details),question_snapshot=VALUES(question_snapshot),status='open',admin_note=NULL,resolved_by=NULL,resolved_at=NULL"
+        );
+        $stmt->execute([$reportedQuestionId,$quizId,$attemptId,$studentId,$reason,$details?:null,json_encode($snapshot,JSON_UNESCAPED_UNICODE|JSON_INVALID_UTF8_SUBSTITUTE)]);
+        echo json_encode(['success'=>true,'message'=>'Đã gửi báo cáo. Quản trị viên sẽ kiểm tra câu hỏi này.'],JSON_UNESCAPED_UNICODE);
+    }catch(Throwable $error){
+        http_response_code(422);
+        echo json_encode(['success'=>false,'message'=>$error->getMessage()],JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
 if($_SERVER['REQUEST_METHOD']==='POST' && ($_POST['action']??'')==='toggle_pause' && !$attempt['submitted_at']){
     verifyCsrfToken();
     header('Content-Type: application/json; charset=utf-8');
@@ -166,6 +208,7 @@ require_once '../includes/header.php';
 .quiz-question-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}.quiz-question-heading>strong{min-width:0}.quiz-answer-status{flex:0 0 auto;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font-size:24px;font-weight:800}.quiz-answer-status.correct{color:#fff;background:var(--success);box-shadow:0 0 0 5px rgba(16,185,129,.12)}.quiz-answer-status.wrong{color:#fff;background:var(--danger);box-shadow:0 0 0 5px rgba(239,68,68,.12)}
 .quiz-question-image{display:block;max-width:min(100%,520px);max-height:320px;object-fit:contain;margin:14px 0;padding:6px;border-radius:9px;background:#fff}.quiz-option-content{min-width:0}.quiz-option-image{display:block;max-width:180px;max-height:120px;object-fit:contain;margin-top:8px;padding:4px;border-radius:6px;background:#fff}
 .quiz-confirm-overlay{position:fixed;inset:0;z-index:2100;display:grid;place-items:center;padding:18px;background:rgba(2,6,23,.62);backdrop-filter:blur(3px)}.quiz-confirm-overlay[hidden]{display:none}.quiz-confirm-dialog{width:min(390px,100%);padding:24px;border:1px solid var(--border-color);border-radius:16px;background:var(--sidebar-bg);box-shadow:0 25px 70px rgba(0,0,0,.42);text-align:center}.quiz-confirm-icon{width:54px;height:54px;margin:0 auto 13px;border-radius:50%;display:grid;place-items:center;background:rgba(245,158,11,.15);color:#fbbf24;font-size:30px}.quiz-confirm-actions{display:flex;justify-content:center;gap:10px;margin-top:20px}
+.quiz-question-actions{display:flex;align-items:center;gap:10px;flex:0 0 auto}.report-question{min-height:34px;padding:6px 10px;border:1px solid rgba(245,158,11,.5);border-radius:8px;background:rgba(245,158,11,.08);color:#fbbf24;font:700 12px inherit;cursor:pointer;white-space:nowrap}.report-question:hover{background:rgba(245,158,11,.15)}.report-question.reported{border-color:rgba(34,197,94,.45);background:rgba(34,197,94,.1);color:#4ade80}.quiz-report-dialog{text-align:left;width:min(520px,100%)}.quiz-report-dialog h3{margin:0 0 8px}.quiz-report-dialog p{margin:0;color:var(--text-muted);line-height:1.5}.quiz-report-form{display:grid;gap:12px;margin-top:18px}.quiz-report-form label{display:grid;gap:6px;font-weight:700}.quiz-report-form select,.quiz-report-form textarea{width:100%;padding:10px 12px;border:1px solid var(--border-color);border-radius:9px;background:var(--input-bg);color:var(--text-main);font:inherit}.quiz-report-form textarea{min-height:96px;resize:vertical}.quiz-report-status{min-height:19px;color:var(--text-muted);font-size:13px}.quiz-report-status.error{color:var(--danger)}.quiz-report-status.success{color:var(--success)}
 @media(max-width:650px){.quiz-options{grid-template-columns:1fr}.quiz-top .btn{width:100%}}
 </style>
 <a href="quizzes.php?course_id=<?php echo (int)$quiz['course_id'];?>&amp;category=<?php echo rawurlencode((string)($quiz['category'] ?? 'Chưa phân loại'));?>" style="color:var(--primary)"><i class='bx bx-arrow-back'></i> Danh sách trắc nghiệm</a>
@@ -181,12 +224,15 @@ require_once '../includes/header.php';
 <?php $number=0;foreach($questions as $question):$number++;$questionChosen=$savedAnswers[(string)$question['id']]??'';$questionIsCorrect=$questionChosen===$question['correct_option'];?>
 <div class="quiz-question">
 <div class="quiz-question-heading">
-<strong>Câu <?php echo $number;?>. <?php echo htmlspecialchars($question['question_text']);?></strong>
-<?php if($attempt['submitted_at']):?>
-<span class="quiz-answer-status <?php echo $questionIsCorrect?'correct':'wrong';?>" title="<?php echo $questionIsCorrect?'Trả lời đúng':'Trả lời sai';?>" aria-label="<?php echo $questionIsCorrect?'Trả lời đúng':'Trả lời sai';?>">
+  <strong>Câu <?php echo $number;?>. <?php echo htmlspecialchars($question['question_text']);?></strong>
+  <div class="quiz-question-actions">
+  <?php if($attempt['submitted_at']):?>
+  <span class="quiz-answer-status <?php echo $questionIsCorrect?'correct':'wrong';?>" title="<?php echo $questionIsCorrect?'Trả lời đúng':'Trả lời sai';?>" aria-label="<?php echo $questionIsCorrect?'Trả lời đúng':'Trả lời sai';?>">
     <i class='bx <?php echo $questionIsCorrect?'bx-check':'bx-x';?>'></i>
-</span>
-<?php endif;?>
+  </span>
+  <?php endif;?>
+  <button class="report-question" type="button" data-question-id="<?php echo (int)$question['id'];?>" data-question-number="<?php echo $number;?>"><i class='bx bx-error-circle'></i> Báo lỗi</button>
+  </div>
 </div>
 <?php if(!empty($question['question_image'])):?><img class="quiz-question-image" src="../uploads/<?php echo htmlspecialchars($question['question_image']);?>" alt="Hình minh họa câu <?php echo $number;?>"><?php endif;?>
 <div class="quiz-options">
@@ -198,6 +244,21 @@ require_once '../includes/header.php';
 </div>
 <?php endforeach;?></section>
 </form>
+<div class="quiz-confirm-overlay" id="quiz-report-overlay" hidden>
+    <div class="quiz-confirm-dialog quiz-report-dialog" role="dialog" aria-modal="true" aria-labelledby="quiz-report-title">
+        <div class="quiz-confirm-icon"><i class='bx bx-error-circle'></i></div>
+        <h3 id="quiz-report-title">Báo lỗi câu hỏi</h3>
+        <p id="quiz-report-question-label">Hãy cho biết vấn đề của câu hỏi để quản trị viên kiểm tra.</p>
+        <form class="quiz-report-form" id="quiz-report-form">
+            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(csrfToken(), ENT_QUOTES, 'UTF-8');?>">
+            <input type="hidden" name="action" value="report_question"><input type="hidden" name="quiz_id" value="<?php echo $quizId;?>"><input type="hidden" name="attempt_id" value="<?php echo $attemptId;?>"><input type="hidden" name="question_id" id="quiz-report-question-id">
+            <label>Lý do<select name="reason" required><option value="answer_wrong">Đáp án có thể không đúng</option><option value="content_unclear">Nội dung câu hỏi chưa rõ</option><option value="typo">Lỗi chính tả hoặc dữ liệu</option><option value="image_error">Hình ảnh/định dạng bị lỗi</option><option value="other">Vấn đề khác</option></select></label>
+            <label>Mô tả thêm <span style="font-weight:400;color:var(--text-muted)">(không bắt buộc)</span><textarea name="details" maxlength="2000" placeholder="Ví dụ: đáp án B có vẻ đúng hơn, hình ảnh bị mờ…"></textarea></label>
+            <div class="quiz-report-status" id="quiz-report-status" aria-live="polite"></div>
+            <div class="quiz-confirm-actions"><button type="button" class="btn btn-outline" id="quiz-report-cancel">Hủy</button><button type="submit" class="btn btn-primary" id="quiz-report-submit"><i class='bx bx-send'></i> Gửi báo cáo</button></div>
+        </form>
+    </div>
+</div>
 <?php if(!$attempt['submitted_at']):?>
 <div class="quiz-confirm-overlay" id="quiz-confirm-overlay" hidden>
     <div class="quiz-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="quiz-confirm-title">
@@ -237,4 +298,50 @@ confirmOverlay?.addEventListener('click',event=>{if(event.target===confirmOverla
 document.addEventListener('keydown',event=>{if(event.key==='Escape'&&confirmOverlay&&!confirmOverlay.hidden)confirmOverlay.hidden=true;});
 drawQuizTime();setInterval(drawQuizTime,1000);
 </script><?php endif;?>
+<script>
+(() => {
+  const reportOverlay = document.getElementById('quiz-report-overlay');
+  const reportForm = document.getElementById('quiz-report-form');
+  const reportQuestionId = document.getElementById('quiz-report-question-id');
+  const reportQuestionLabel = document.getElementById('quiz-report-question-label');
+  const reportStatus = document.getElementById('quiz-report-status');
+  const reportSubmit = document.getElementById('quiz-report-submit');
+  let reportedButton = null;
+  if (!reportOverlay || !reportForm || !reportQuestionId || !reportSubmit) return;
+  function closeReportDialog() { reportOverlay.hidden = true; }
+  document.querySelectorAll('.report-question').forEach(button => button.addEventListener('click', () => {
+    reportedButton = button;
+    reportForm.reset();
+    reportQuestionId.value = button.dataset.questionId || '';
+    reportQuestionLabel.textContent = `Báo lỗi cho câu ${button.dataset.questionNumber || ''}. Bạn có thể mô tả thêm để quản trị viên kiểm tra nhanh hơn.`;
+    reportStatus.textContent = ''; reportStatus.className = 'quiz-report-status';
+    reportOverlay.hidden = false;
+    reportForm.querySelector('[name="reason"]')?.focus();
+  }));
+  document.getElementById('quiz-report-cancel')?.addEventListener('click', closeReportDialog);
+  reportOverlay.addEventListener('click', event => { if (event.target === reportOverlay) closeReportDialog(); });
+  document.addEventListener('keydown', event => { if (event.key === 'Escape' && !reportOverlay.hidden) closeReportDialog(); });
+  reportForm.addEventListener('submit', async event => {
+    event.preventDefault();
+    reportSubmit.disabled = true;
+    reportStatus.textContent = 'Đang gửi báo cáo…'; reportStatus.className = 'quiz-report-status';
+    try {
+      const response = await fetch(location.href, { method: 'POST', body: new FormData(reportForm), headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result?.success) throw new Error(result?.message || 'Không thể gửi báo cáo lúc này.');
+      reportStatus.textContent = result.message; reportStatus.className = 'quiz-report-status success';
+      if (reportedButton) {
+        reportedButton.classList.add('reported');
+        reportedButton.innerHTML = "<i class='bx bx-check-circle'></i> Đã báo";
+      }
+      window.setTimeout(closeReportDialog, 750);
+    } catch (error) {
+      reportStatus.textContent = error?.message || 'Không thể gửi báo cáo lúc này.';
+      reportStatus.className = 'quiz-report-status error';
+    } finally {
+      reportSubmit.disabled = false;
+    }
+  });
+})();
+</script>
 <?php require_once '../includes/footer.php';?>
