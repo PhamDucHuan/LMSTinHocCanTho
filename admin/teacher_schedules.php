@@ -62,7 +62,7 @@ $totalSessions = 0;
 if ($teacherId > 0) {
     $classStmt = $pdo->prepare(
         "SELECT tc.id, tc.class_name, tc.notes, tc.status, tc.time_shift, c.title AS course_title,
-                GROUP_CONCAT(tcs.student_name ORDER BY tcs.student_name SEPARATOR ', ') AS students,
+                GROUP_CONCAT(DISTINCT tcs.student_name ORDER BY tcs.student_name SEPARATOR ', ') AS students,
                 COUNT(DISTINCT tcs.id) AS student_count
          FROM teaching_classes tc
          LEFT JOIN courses c ON c.id=tc.course_id

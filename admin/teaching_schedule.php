@@ -31,16 +31,26 @@ function plannedWeekdays(mixed $value): array
     return $days;
 }
 
+function teachingClassStudentNameKey(string $name): string
+{
+    $name = preg_replace('/[\t ]+/u', ' ', trim($name)) ?? '';
+    return mb_strtolower($name, 'UTF-8');
+}
+
 function teachingClassStudentNames(string $value): array
 {
     // Chỉ tách theo xuống dòng thực tế. Không dùng \R vì một số ký tự Unicode
     // trong tên tiếng Việt có thể bị trình soạn thảo/IME chuẩn hóa không như mong muốn.
     $value = str_replace(["\r\n", "\r"], "\n", $value);
     $lines = preg_split('/\n/u', $value) ?: [];
-    $names = array_map(static function (string $name): string {
-        return preg_replace('/[\t ]+/u', ' ', trim($name)) ?? '';
-    }, $lines);
-    return array_values(array_unique(array_filter($names, static fn(string $name): bool => $name !== '')));
+    $uniqueNames = [];
+    foreach ($lines as $name) {
+        $name = preg_replace('/[\t ]+/u', ' ', trim((string) $name)) ?? '';
+        if ($name === '') continue;
+        $key = teachingClassStudentNameKey($name);
+        if (!isset($uniqueNames[$key])) $uniqueNames[$key] = $name;
+    }
+    return array_values($uniqueNames);
 }
 
 function appendPlannedSlots(PDO $pdo, int $classId, int $userId, ?string $notBeforeDate = null): void
@@ -241,7 +251,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && str_contains((string) ($_SERVER['CO
 
         if ($action === 'get_class') {
             $stmt = $pdo->prepare('SELECT tc.id, tc.class_name, tc.notes, tc.total_sessions, tc.planned_weekdays, tc.planned_start_date, tc.planned_start_time, tc.planned_end_time, tc.time_shift, tc.teacher_id, tc.status,
-                GROUP_CONCAT(tcs.student_name ORDER BY tcs.student_name SEPARATOR "\\n") AS students
+                GROUP_CONCAT(DISTINCT tcs.student_name ORDER BY tcs.student_name SEPARATOR "\\n") AS students
                 FROM teaching_classes tc LEFT JOIN teaching_class_students tcs ON tcs.teaching_class_id=tc.id WHERE tc.id=? GROUP BY tc.id');
             $stmt->execute([$classId]);
             $class = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -607,18 +617,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     } else {
                         $pdo->prepare('UPDATE teaching_classes SET class_name=?, notes=?, teacher_id=?, time_shift=? WHERE id=?')->execute([$className, $notes ?: null, $teacherId, $timeShift, $classId]);
                     }
-                    $existingStudents = $pdo->prepare('SELECT id, student_name FROM teaching_class_students WHERE teaching_class_id=?');
+                    // Lock the roster while synchronizing it so two simultaneous saves cannot add duplicates.
+                    $pdo->prepare('SELECT id FROM teaching_classes WHERE id=? FOR UPDATE')->execute([$classId]);
+                    $existingStudents = $pdo->prepare('SELECT id, student_name, student_id FROM teaching_class_students WHERE teaching_class_id=? ORDER BY id FOR UPDATE');
                     $existingStudents->execute([$classId]);
-                    $selectedNames = array_fill_keys($names, true);
+                    $selectedNames = [];
+                    foreach ($names as $name) $selectedNames[teachingClassStudentNameKey($name)] = $name;
                     $existingNames = [];
+                    $existingRosterKeys = [];
                     $deleteStudent = $pdo->prepare('DELETE FROM teaching_class_students WHERE id=? AND teaching_class_id=?');
+                    $moveAttendance = $pdo->prepare('UPDATE IGNORE teaching_schedule_student_attendance SET student_id=? WHERE student_id=?');
+                    $removeOldAttendance = $pdo->prepare('DELETE FROM teaching_schedule_student_attendance WHERE student_id=?');
+                    $moveMakeupSlots = $pdo->prepare('UPDATE teaching_schedule_slots SET makeup_student_id=? WHERE makeup_student_id=?');
                     foreach ($existingStudents->fetchAll(PDO::FETCH_ASSOC) as $student) {
+                        $studentRowId = (int) $student['id'];
                         $studentName = (string) $student['student_name'];
-                        if (!isset($selectedNames[$studentName])) $deleteStudent->execute([(int) $student['id'], $classId]);
-                        else $existingNames[$studentName] = true;
+                        $studentKey = teachingClassStudentNameKey($studentName);
+                        $identityKey = $student['student_id'] === null ? 'free-text' : 'user:' . (int) $student['student_id'];
+                        $rosterKey = $studentKey . '|' . $identityKey;
+                        if (!isset($selectedNames[$studentKey])) {
+                            $deleteStudent->execute([$studentRowId, $classId]);
+                        } elseif (isset($existingRosterKeys[$rosterKey])) {
+                            $keeperId = $existingRosterKeys[$rosterKey];
+                            $moveAttendance->execute([$keeperId, $studentRowId]);
+                            $removeOldAttendance->execute([$studentRowId]);
+                            $moveMakeupSlots->execute([$keeperId, $studentRowId]);
+                            $deleteStudent->execute([$studentRowId, $classId]);
+                        } else {
+                            $existingRosterKeys[$rosterKey] = $studentRowId;
+                            $existingNames[$studentKey] = true;
+                        }
                     }
                     $insertStudent = $pdo->prepare('INSERT INTO teaching_class_students (teaching_class_id, student_name, student_id) VALUES (?, ?, NULL)');
-                    foreach ($names as $name) if (!isset($existingNames[$name])) $insertStudent->execute([$classId, mb_substr($name, 0, 191, 'UTF-8')]);
+                    foreach ($selectedNames as $studentKey => $name) {
+                        if (!isset($existingNames[$studentKey])) $insertStudent->execute([$classId, mb_substr($name, 0, 191, 'UTF-8')]);
+                    }
                     $pdo->commit();
                     writeAuditLog($pdo, 'teaching_schedule.class_updated', 'teaching_class', $classId, ['class_name' => $className, 'student_count' => count($names), 'schedule_updated' => $updateSchedule, 'schedule_apply_date' => $updateSchedule ? $scheduleApplyDate : null]);
                     $_SESSION['success'] = $updateSchedule ? 'Đã cập nhật lớp và áp dụng lịch mới từ ' . date('d/m/Y', strtotime($scheduleApplyDate)) . '. Các buổi trước ngày này được giữ nguyên.' : 'Đã cập nhật lớp.';
@@ -655,7 +688,7 @@ $substituteTeachers = $pdo->query("SELECT id, name, email FROM users WHERE role 
 $teachers = $canManageAllSchedules ? $substituteTeachers : [];
 $classSql =
     "SELECT tc.id, tc.class_name, tc.notes, tc.status, tc.sort_order, tc.time_shift, tc.teacher_id, u.name AS primary_teacher_name, u.name AS teacher_name,
-            GROUP_CONCAT(tcs.student_name ORDER BY tcs.student_name SEPARATOR ', ') AS students,
+            GROUP_CONCAT(DISTINCT tcs.student_name ORDER BY tcs.student_name SEPARATOR ', ') AS students,
             COUNT(DISTINCT tcs.id) AS student_count
      FROM teaching_classes tc
      LEFT JOIN users u ON u.id=tc.teacher_id

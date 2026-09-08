@@ -877,6 +877,9 @@ $unreadNotifications ??= 0;
                         ['url' => '../admin/online_users.php', 'icon' => 'bx-radio-circle-marked', 'label' => 'Người đang online', 'match' => ['admin/online_users.php']],
                         ['url' => '../admin/tickets.php', 'icon' => 'bx-support', 'label' => 'Quản lý Hỗ trợ', 'match' => ['admin/tickets.php', 'admin/ticket_detail.php']],
                     ]],
+                    ['id' => 'tools', 'label' => 'Công cụ', 'icon' => 'bx-wrench', 'items' => [
+                        ['url' => '../admin/google_form_fill.php', 'icon' => 'bxl-google', 'label' => 'Điền Google Form', 'match' => ['admin/google_form_fill.php']],
+                    ]],
                     ['id' => 'system', 'label' => 'Quản trị hệ thống', 'icon' => 'bx-cog', 'items' => [
                         ['url' => '../admin/users.php', 'icon' => 'bx-group', 'label' => 'Quản lý Tài khoản', 'match' => ['admin/users.php']],
                         ['url' => '../admin/settings.php', 'icon' => 'bx-slider-alt', 'label' => 'Cấu hình hệ thống', 'match' => ['admin/settings.php']],

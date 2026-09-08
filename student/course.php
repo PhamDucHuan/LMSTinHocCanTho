@@ -63,19 +63,16 @@ require_once '../includes/header.php';
     .course-description { white-space:normal;line-height:1.8;color:rgba(255,255,255,.84);overflow-wrap:anywhere; }
     .course-info-row { display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.08); }
     .course-materials { margin-bottom:22px; }
-    .course-material-group + .course-material-group { margin-top:28px;padding-top:24px;border-top:1px solid rgba(255,255,255,.1); }
-    .course-material-group-title { display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px; }
-    .course-material-group-title h3 { margin:0;font-size:18px; }
-    .course-material-group-title span { color:var(--text-muted);font-size:13px; }
-    .course-material-grid { display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px; }
-    .course-material-card { border:1px solid rgba(255,255,255,.1);border-radius:14px;padding:16px;background:rgba(10,28,51,.38); }
-    .course-material-card h3 { margin:0 0 8px;font-size:17px;overflow-wrap:anywhere; }
-    .course-material-card p { margin:0 0 13px;color:var(--text-muted);font-size:13px;overflow-wrap:anywhere; }
-    .course-material-pdf { height:560px;overflow:hidden;border:1px solid rgba(255,255,255,.12);border-radius:10px;background:#fff;margin:12px 0; }
-    .course-material-pdf iframe { display:block;width:100%;height:100%;border:0; }
-    .course-material-video { position:relative;aspect-ratio:16/9;overflow:hidden;border-radius:10px;background:#050b16;margin-top:12px; }
+    .course-material-documents { padding:16px;border:1px solid rgba(125,211,252,.18);border-radius:14px;background:rgba(10,28,51,.34); }
+    .course-material-videos + .course-material-documents { margin-top:20px; }
+    .course-material-documents h3,.course-material-videos>h3 { margin:0 0 12px;font-size:17px; }
+    .course-material-document-list { display:flex;gap:10px;flex-wrap:wrap; }
+    .course-material-document-list .btn { max-width:100%;overflow-wrap:anywhere; }
+    .course-material-video-list { display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:18px; }
+    .course-material-video-item h4 { margin:0 0 9px;font-size:16px;overflow-wrap:anywhere; }
+    .course-material-video { position:relative;aspect-ratio:16/9;overflow:hidden;border:1px solid rgba(255,255,255,.1);border-radius:12px;background:#050b16; }
     .course-material-video iframe { position:absolute;inset:0;width:100%;height:100% !important;border:0; }
-    @media(max-width:800px) { .course-detail-layout{grid-template-columns:1fr}.course-detail-actions{width:100%;justify-content:stretch}.course-detail-actions>*{width:100%}.course-material-pdf{height:420px} }
+    @media(max-width:800px) { .course-detail-layout{grid-template-columns:1fr}.course-detail-actions{width:100%;justify-content:stretch}.course-detail-actions>*{width:100%}.course-material-video-list{grid-template-columns:1fr} }
 </style>
 
 <a href="dashboard.php" style="display:inline-block;margin-bottom:18px;color:var(--primary);"><i class='bx bx-arrow-back'></i> Quay lại tổng quan</a>
@@ -108,32 +105,26 @@ require_once '../includes/header.php';
         <h2 style="margin:0;"><i class='bx bx-book-content'></i> Học liệu</h2>
         <span style="color:var(--text-muted);font-size:13px;"><?php echo count($courseMaterials); ?> tài liệu / video</span>
     </div>
-    <?php if ($pdfMaterials): ?>
-    <div class="course-material-group">
-        <div class="course-material-group-title"><h3><i class='bx bx-file' style="color:#f87171;"></i> Giáo trình PDF</h3><span><?php echo count($pdfMaterials); ?> tài liệu</span></div>
-        <div class="course-material-grid">
-        <?php foreach ($pdfMaterials as $material): ?>
-            <article class="course-material-card">
-                <h3><i class='bx bx-file' style="color:#f87171;"></i> <?php echo htmlspecialchars((string) $material['title']); ?></h3>
-                <p><?php echo htmlspecialchars((string) ($material['file_name'] ?: 'Giáo trình PDF')); ?></p>
-                <div class="course-material-pdf"><iframe src="../download.php?kind=course_material&amp;id=<?php echo (int) $material['id']; ?>&amp;preview=1" title="<?php echo htmlspecialchars((string) $material['title'], ENT_QUOTES, 'UTF-8'); ?>" loading="lazy"></iframe></div>
-                <div style="display:flex;gap:9px;flex-wrap:wrap;"><a class="btn btn-outline" target="_blank" rel="noopener" href="../download.php?kind=course_material&amp;id=<?php echo (int) $material['id']; ?>&amp;preview=1"><i class='bx bx-expand'></i> Mở toàn màn hình</a><a class="btn btn-outline" href="../download.php?kind=course_material&amp;id=<?php echo (int) $material['id']; ?>"><i class='bx bx-download'></i> Tải về</a></div>
+    <?php if ($videoMaterials): ?>
+    <div class="course-material-videos">
+        <h3><i class='bx bxl-youtube' style="color:#ff0033;"></i> Video hướng dẫn</h3>
+        <div class="course-material-video-list">
+        <?php foreach ($videoMaterials as $material): ?>
+            <article class="course-material-video-item">
+                <h4><?php echo htmlspecialchars((string) $material['title']); ?></h4>
+                <div class="course-material-video"><iframe src="https://www.youtube-nocookie.com/embed/<?php echo rawurlencode((string) $material['youtube_video_id']); ?>?rel=0" title="<?php echo htmlspecialchars((string) $material['title'], ENT_QUOTES, 'UTF-8'); ?>" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div>
             </article>
         <?php endforeach; ?>
         </div>
     </div>
     <?php endif; ?>
 
-    <?php if ($videoMaterials): ?>
-    <div class="course-material-group">
-        <div class="course-material-group-title"><h3><i class='bx bxl-youtube' style="color:#ff0033;"></i> Video hướng dẫn</h3><span><?php echo count($videoMaterials); ?> video</span></div>
-        <div class="course-material-grid">
-        <?php foreach ($videoMaterials as $material): ?>
-            <article class="course-material-card">
-                <h3><i class='bx bxl-youtube' style="color:#ff0033;"></i> <?php echo htmlspecialchars((string) $material['title']); ?></h3>
-                <p>Video hướng dẫn từ YouTube</p>
-                <div class="course-material-video"><iframe src="https://www.youtube-nocookie.com/embed/<?php echo rawurlencode((string) $material['youtube_video_id']); ?>?rel=0" title="<?php echo htmlspecialchars((string) $material['title'], ENT_QUOTES, 'UTF-8'); ?>" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div>
-            </article>
+    <?php if ($pdfMaterials): ?>
+    <div class="course-material-documents">
+        <h3><i class='bx bx-file' style="color:#f87171;"></i> Giáo trình</h3>
+        <div class="course-material-document-list">
+        <?php foreach ($pdfMaterials as $material): ?>
+            <a class="btn btn-outline" target="_blank" rel="noopener" href="../download.php?kind=course_material&amp;id=<?php echo (int) $material['id']; ?>&amp;preview=1"><i class='bx bx-book-open'></i> Xem <?php echo htmlspecialchars((string) $material['title']); ?> <i class='bx bx-link-external'></i></a>
         <?php endforeach; ?>
         </div>
     </div>
