@@ -1352,7 +1352,7 @@ document.addEventListener('click', (event) => {
 })();
 </script>
 <style>
-.slot.status-pending{background:#dbeafe;color:#173b68}.slot.status-present{background:#86efac;color:#123c22;box-shadow:inset 0 0 0 1px #22c55e}.slot.status-absent{background:#fca5a5;color:#5f1515;box-shadow:inset 0 0 0 1px #ef4444;text-decoration:line-through}.slot.student-makeup{background:#fde68a;color:#5b3b08;text-decoration:none}.schedule-cell.attendance-present{background:rgba(34,197,94,.16)!important}.schedule-cell.attendance-absent{background:rgba(239,68,68,.17)!important}.attendance-toggle{display:grid;grid-template-columns:1fr 1fr;gap:3px;margin:3px 0 1px}.attendance-choice{min-height:25px;padding:3px 4px;border:1px solid var(--border-color);border-radius:6px;background:rgba(255,255,255,.035);color:var(--text-muted);font:700 10px/1.15 inherit;cursor:pointer}.attendance-choice:hover{filter:brightness(1.12)}.attendance-choice.is-present{border-color:#22c55e;background:#166534;color:#dcfce7}.attendance-choice.is-absent{border-color:#ef4444;background:#991b1b;color:#fee2e2}.attendance-choice:disabled{cursor:wait;opacity:.65}.individual-attendance-open{grid-column:1/-1;border-color:#60a5fa;color:#bfdbfe}.student-attendance-dialog{width:min(620px,calc(100vw - 28px))}.student-attendance-list{display:grid;gap:8px;max-height:min(58vh,520px);overflow:auto}.student-attendance-row{display:grid;grid-template-columns:minmax(130px,1fr) auto;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--border-color);border-radius:10px}.student-attendance-row strong{overflow-wrap:anywhere}.student-attendance-actions{display:grid;grid-template-columns:repeat(2,82px);gap:5px}.student-attendance-status{min-height:20px;color:var(--text-muted);font-size:12px}@media(max-width:520px){.student-attendance-row{grid-template-columns:1fr}.student-attendance-actions{grid-template-columns:1fr 1fr}}
+.slot.status-pending{background:#dbeafe;color:#173b68}.slot.status-present{background:#86efac;color:#123c22;box-shadow:inset 0 0 0 1px #22c55e}.slot.status-absent{background:#fca5a5;color:#5f1515;box-shadow:inset 0 0 0 1px #ef4444;text-decoration:line-through}.slot.student-makeup{background:#fde68a;color:#5b3b08;text-decoration:none}.schedule-cell.attendance-present{background:rgba(34,197,94,.16)!important}.schedule-cell.attendance-absent{background:rgba(239,68,68,.17)!important}.attendance-toggle{display:grid;grid-template-columns:1fr 1fr;gap:3px;margin:3px 0 1px}.attendance-choice,.attendance-reopen{min-height:25px;padding:3px 4px;border:1px solid var(--border-color);border-radius:6px;background:rgba(255,255,255,.035);color:var(--text-muted);font:700 10px/1.15 inherit;cursor:pointer}.attendance-choice:hover,.attendance-reopen:hover{filter:brightness(1.12)}.attendance-choice.is-present{border-color:#22c55e;background:#166534;color:#dcfce7}.attendance-choice.is-absent{border-color:#ef4444;background:#991b1b;color:#fee2e2}.attendance-choice:disabled{cursor:wait;opacity:.65}.attendance-reopen{display:flex;width:100%;align-items:center;justify-content:center;gap:5px;margin:3px 0 1px;border-color:#60a5fa;background:rgba(37,99,235,.12);color:#bfdbfe}.attendance-reopen:hover{background:rgba(37,99,235,.24)}.individual-attendance-open,.attendance-collapse{grid-column:1/-1}.individual-attendance-open{border-color:#60a5fa;color:#bfdbfe}.attendance-collapse{border-style:dashed}.student-attendance-dialog{width:min(620px,calc(100vw - 28px))}.student-attendance-list{display:grid;gap:8px;max-height:min(58vh,520px);overflow:auto}.student-attendance-row{display:grid;grid-template-columns:minmax(130px,1fr) auto;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--border-color);border-radius:10px}.student-attendance-row strong{overflow-wrap:anywhere}.student-attendance-actions{display:grid;grid-template-columns:repeat(2,82px);gap:5px}.student-attendance-status{min-height:20px;color:var(--text-muted);font-size:12px}@media(max-width:520px){.student-attendance-row{grid-template-columns:1fr}.student-attendance-actions{grid-template-columns:1fr 1fr}}
 </style>
 <style>.slot.student-makeup.status-present{background:#86efac;color:#123c22;text-decoration:none}.slot.student-makeup.status-absent{background:#fca5a5;color:#5f1515}</style>
 <script>
@@ -1405,7 +1405,7 @@ document.addEventListener('click', (event) => {
     const removeDeletedSlots = (ids = []) => ids.forEach((id) => {
         const removed = document.querySelector('.slot[data-slot-id="' + id + '"]');
         if (!removed) return;
-        const controls = removed.nextElementSibling?.classList.contains('attendance-toggle') ? removed.nextElementSibling : null;
+        const controls = removed.nextElementSibling?.matches('.attendance-toggle, .attendance-reopen') ? removed.nextElementSibling : null;
         const cell = removed.closest('.schedule-cell');
         controls?.remove(); removed.remove(); if (cell) refreshCellColor(cell);
     });
@@ -1489,13 +1489,10 @@ document.addEventListener('click', (event) => {
         dialog.showModal();
     };
 
-    const enhanceSlot = (slot) => {
+    const createAttendanceControls = (slot, canCollapse = false) => {
         const status = attendanceBySlot[slot.dataset.slotId] || 'pending';
         const cell = slot.closest('.schedule-cell');
         const target = makeupStudentBySlot[slot.dataset.slotId];
-        if (target) slot.textContent = slot.dataset.start + ' – ' + slot.dataset.end + ' · Bù ' + target.name;
-        paintSlot(slot, status);
-        if (!cell || cell.dataset.date !== today) return;
         const controls = document.createElement('div'); controls.className = 'attendance-toggle';
         if (target) {
             controls.append(choiceButton(slot, target.id, 'present', '✓ Có học', status, controls));
@@ -1510,7 +1507,45 @@ document.addEventListener('click', (event) => {
                 controls.append(individual);
             }
         }
-        slot.after(controls);
+        if (canCollapse) {
+            const collapse = document.createElement('button');
+            collapse.type = 'button'; collapse.className = 'attendance-choice attendance-collapse'; collapse.textContent = 'Thu gọn';
+            collapse.addEventListener('click', (event) => {
+                event.preventDefault(); event.stopPropagation();
+                controls.replaceWith(createPastAttendanceButton(slot));
+            });
+            controls.append(collapse);
+        }
+        return controls;
+    };
+
+    const createPastAttendanceButton = (slot) => {
+        const button = document.createElement('button');
+        button.type = 'button'; button.className = 'attendance-reopen';
+        button.innerHTML = "<i class='bx bx-revision'></i> Điểm danh lại";
+        button.addEventListener('click', (event) => {
+            event.preventDefault(); event.stopPropagation();
+            const controls = createAttendanceControls(slot, true);
+            button.replaceWith(controls);
+            paintSlot(slot, slot.dataset.attendanceStatus || 'pending');
+        });
+        return button;
+    };
+
+    const enhanceSlot = (slot) => {
+        const status = attendanceBySlot[slot.dataset.slotId] || 'pending';
+        const cell = slot.closest('.schedule-cell');
+        const target = makeupStudentBySlot[slot.dataset.slotId];
+        if (target) slot.textContent = slot.dataset.start + ' – ' + slot.dataset.end + ' · Bù ' + target.name;
+        paintSlot(slot, status);
+        if (!cell || cell.dataset.date > today) return;
+        const existingControls = slot.nextElementSibling;
+        if (existingControls?.matches('.attendance-toggle, .attendance-reopen')) existingControls.remove();
+        if (cell.dataset.date < today) {
+            slot.after(createPastAttendanceButton(slot));
+            return;
+        }
+        slot.after(createAttendanceControls(slot));
         paintSlot(slot, status);
     };
 

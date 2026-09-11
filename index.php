@@ -101,23 +101,25 @@ if (!empty($_SESSION['user_id'])) {
                 </form>
 
                 <!-- Register Form -->
-                <form id="register-form" action="includes/auth.php" method="POST" class="auth-form">
+                <form id="register-form" action="includes/auth.php" method="POST" class="auth-form" novalidate>
                 <?php echo csrfField(); ?>
                 <input type="hidden" name="action" value="register">
-                
+
+                <div class="register-feedback" id="register-feedback" role="alert" aria-live="assertive" hidden></div>
+
                 <div class="input-group">
                     <i class='bx bx-user'></i>
-                    <input type="text" name="name" required placeholder="Họ và tên">
+                    <input type="text" name="name" required maxlength="191" autocomplete="name" placeholder="Họ và tên">
                 </div>
 
                 <div class="input-group">
                     <i class='bx bx-envelope'></i>
-                    <input type="email" name="email" required placeholder="Email của bạn">
+                    <input type="email" name="email" required maxlength="191" autocomplete="email" placeholder="Email của bạn">
                 </div>
-                
+
                 <div class="input-group">
                     <i class='bx bx-lock-alt'></i>
-                    <input type="password" name="password" required placeholder="Mật khẩu">
+                    <input type="password" name="password" required minlength="8" autocomplete="new-password" placeholder="Mật khẩu (ít nhất 8 ký tự)">
                 </div>
 
                 <p class="form-note">Tài khoản mới được tạo với vai trò Học viên. Admin có thể cấp quyền Giảng viên sau.</p>
