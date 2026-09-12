@@ -31,6 +31,23 @@ function plannedWeekdays(mixed $value): array
     return $days;
 }
 
+function plannedDailyTimeRanges(array $config): array
+{
+    $ranges = [];
+    $start = substr((string) ($config['planned_start_time'] ?? ''), 0, 5);
+    $end = substr((string) ($config['planned_end_time'] ?? ''), 0, 5);
+    if (preg_match('/^\d{2}:\d{2}$/', $start) && preg_match('/^\d{2}:\d{2}$/', $end) && $start < $end) {
+        $ranges[] = [$start, $end];
+    }
+    $secondStart = substr((string) ($config['planned_second_start_time'] ?? ''), 0, 5);
+    $secondEnd = substr((string) ($config['planned_second_end_time'] ?? ''), 0, 5);
+    if (preg_match('/^\d{2}:\d{2}$/', $secondStart) && preg_match('/^\d{2}:\d{2}$/', $secondEnd)
+        && $secondStart < $secondEnd && (!$ranges || $secondStart >= $ranges[0][1])) {
+        $ranges[] = [$secondStart, $secondEnd];
+    }
+    return $ranges;
+}
+
 function teachingClassStudentNameKey(string $name): string
 {
     $name = preg_replace('/[\t ]+/u', ' ', trim($name)) ?? '';
@@ -55,12 +72,13 @@ function teachingClassStudentNames(string $value): array
 
 function appendPlannedSlots(PDO $pdo, int $classId, int $userId, ?string $notBeforeDate = null): void
 {
-    $configStmt = $pdo->prepare('SELECT total_sessions, planned_weekdays, planned_start_date, planned_start_time, planned_end_time FROM teaching_classes WHERE id=?');
+    $configStmt = $pdo->prepare('SELECT total_sessions, planned_weekdays, planned_start_date, planned_start_time, planned_end_time, planned_second_start_time, planned_second_end_time FROM teaching_classes WHERE id=?');
     $configStmt->execute([$classId]);
     $config = $configStmt->fetch(PDO::FETCH_ASSOC);
     $days = plannedWeekdays($config['planned_weekdays'] ?? '');
     $total = (int) ($config['total_sessions'] ?? 0);
-    if ($total <= 0 || !$days || empty($config['planned_start_date']) || empty($config['planned_start_time']) || empty($config['planned_end_time'])) return;
+    $dailyRanges = plannedDailyTimeRanges($config ?: []);
+    if ($total <= 0 || !$days || empty($config['planned_start_date']) || !$dailyRanges) return;
     // Buổi vắng được giữ lại làm lịch sử, nhưng không tính vào số buổi thực học
     // đã cấu hình. Vì vậy mỗi lần có buổi vắng, lịch sẽ được nối thêm ở phía sau.
     $countStmt = $pdo->prepare("SELECT COUNT(*) FROM teaching_schedule_slots WHERE teaching_class_id=? AND makeup_student_id IS NULL AND attendance_status<>'absent'");
@@ -81,8 +99,11 @@ function appendPlannedSlots(PDO $pdo, int $classId, int $userId, ?string $notBef
     $insert = $pdo->prepare('INSERT INTO teaching_schedule_slots (teaching_class_id, teaching_date, start_time, end_time, is_makeup, created_by) VALUES (?, ?, ?, ?, 0, ?)');
     for ($guard = 0; $remaining > 0 && $guard < 3660; $guard++, $cursor = $cursor->modify('+1 day')) {
         if (in_array((int) $cursor->format('N'), $days, true)) {
-            $insert->execute([$classId, $cursor->format('Y-m-d'), $config['planned_start_time'], $config['planned_end_time'], $userId]);
-            $remaining--;
+            foreach ($dailyRanges as [$rangeStart, $rangeEnd]) {
+                if ($remaining <= 0) break;
+                $insert->execute([$classId, $cursor->format('Y-m-d'), $rangeStart, $rangeEnd, $userId]);
+                $remaining--;
+            }
         }
     }
 }
@@ -250,7 +271,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && str_contains((string) ($_SERVER['CO
         if (!canManageTeachingClass($pdo, $classId, (int) $_SESSION['user_id'], $canManageAllSchedules)) throw new RuntimeException('Bạn không có quyền sửa lịch của lớp này.');
 
         if ($action === 'get_class') {
-            $stmt = $pdo->prepare('SELECT tc.id, tc.class_name, tc.notes, tc.total_sessions, tc.planned_weekdays, tc.planned_start_date, tc.planned_start_time, tc.planned_end_time, tc.time_shift, tc.teacher_id, tc.status,
+            $stmt = $pdo->prepare('SELECT tc.id, tc.class_name, tc.notes, tc.total_sessions, tc.planned_weekdays, tc.planned_start_date, tc.planned_start_time, tc.planned_end_time, tc.planned_second_start_time, tc.planned_second_end_time, tc.time_shift, tc.teacher_id, tc.status,
                 GROUP_CONCAT(DISTINCT tcs.student_name ORDER BY tcs.student_name SEPARATOR "\\n") AS students
                 FROM teaching_classes tc LEFT JOIN teaching_class_students tcs ON tcs.teaching_class_id=tc.id WHERE tc.id=? GROUP BY tc.id');
             $stmt->execute([$classId]);
@@ -480,6 +501,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $plannedStartDate = (string) ($_POST['planned_start_date'] ?? '');
         $plannedStartTime = (string) ($_POST['planned_start_time'] ?? '');
         $plannedEndTime = (string) ($_POST['planned_end_time'] ?? '');
+        $useSecondDailyShift = (string) ($_POST['use_second_daily_shift'] ?? '') === '1';
+        $plannedSecondStartTime = $useSecondDailyShift ? (string) ($_POST['planned_second_start_time'] ?? '') : '';
+        $plannedSecondEndTime = $useSecondDailyShift ? (string) ($_POST['planned_second_end_time'] ?? '') : '';
         $timeShift = (string) ($_POST['time_shift'] ?? 'morning');
         if (!in_array($timeShift, ['morning', 'afternoon', 'evening'], true)) $timeShift = 'morning';
         $teacherId = $canManageAllSchedules ? ((int) ($_POST['teacher_id'] ?? 0) ?: null) : (int) $_SESSION['user_id'];
@@ -488,12 +512,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['error'] = 'Vui lòng nhập tên lớp.';
         } elseif ($totalSessions > 0 && (!$plannedDays || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $plannedStartDate) || !preg_match('/^\d{2}:\d{2}$/', $plannedStartTime) || !preg_match('/^\d{2}:\d{2}$/', $plannedEndTime) || $plannedStartTime >= $plannedEndTime)) {
             $_SESSION['error'] = 'Vui lòng nhập đủ số buổi, thứ học, ngày bắt đầu và giờ học dự kiến.';
+        } elseif ($totalSessions > 0 && $useSecondDailyShift && (!preg_match('/^\d{2}:\d{2}$/', $plannedSecondStartTime) || !preg_match('/^\d{2}:\d{2}$/', $plannedSecondEndTime) || $plannedSecondStartTime >= $plannedSecondEndTime || $plannedSecondStartTime < $plannedEndTime)) {
+            $_SESSION['error'] = 'Ca thứ hai phải có giờ hợp lệ, bắt đầu sau khi ca thứ nhất kết thúc và không được trùng giờ.';
         } else {
             $pdo->beginTransaction();
             try {
                 $nextOrder = (int) $pdo->query('SELECT COALESCE(MAX(sort_order), 0) + 1 FROM teaching_classes')->fetchColumn();
-                $stmt = $pdo->prepare('INSERT INTO teaching_classes (class_name, notes, total_sessions, planned_weekdays, planned_start_date, planned_start_time, planned_end_time, time_shift, teacher_id, created_by, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-                $stmt->execute([$className, $notes ?: null, $totalSessions ?: null, $plannedDays ? implode(',', $plannedDays) : null, $totalSessions ? $plannedStartDate : null, $totalSessions ? $plannedStartTime : null, $totalSessions ? $plannedEndTime : null, $timeShift, $teacherId, (int) $_SESSION['user_id'], $nextOrder]);
+                $stmt = $pdo->prepare('INSERT INTO teaching_classes (class_name, notes, total_sessions, planned_weekdays, planned_start_date, planned_start_time, planned_end_time, planned_second_start_time, planned_second_end_time, time_shift, teacher_id, created_by, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+                $stmt->execute([$className, $notes ?: null, $totalSessions ?: null, $plannedDays ? implode(',', $plannedDays) : null, $totalSessions ? $plannedStartDate : null, $totalSessions ? $plannedStartTime : null, $totalSessions ? $plannedEndTime : null, $totalSessions && $useSecondDailyShift ? $plannedSecondStartTime : null, $totalSessions && $useSecondDailyShift ? $plannedSecondEndTime : null, $timeShift, $teacherId, (int) $_SESSION['user_id'], $nextOrder]);
                 $classId = (int) $pdo->lastInsertId();
                 $studentInsert = $pdo->prepare('INSERT INTO teaching_class_students (teaching_class_id, student_name, student_id) VALUES (?, ?, NULL)');
                 foreach ($names as $name) $studentInsert->execute([$classId, mb_substr($name, 0, 191, 'UTF-8')]);
@@ -587,6 +613,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $scheduleApplyDate = (string) ($_POST['schedule_apply_date'] ?? '');
         $plannedStartTime = (string) ($_POST['planned_start_time'] ?? '');
         $plannedEndTime = (string) ($_POST['planned_end_time'] ?? '');
+        $useSecondDailyShift = (string) ($_POST['use_second_daily_shift'] ?? '') === '1';
+        $plannedSecondStartTime = $useSecondDailyShift ? (string) ($_POST['planned_second_start_time'] ?? '') : '';
+        $plannedSecondEndTime = $useSecondDailyShift ? (string) ($_POST['planned_second_end_time'] ?? '') : '';
         if ($canManageAllSchedules) {
             $teacherId = ((int) ($_POST['teacher_id'] ?? 0) ?: null);
         } else {
@@ -602,15 +631,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $_SESSION['error'] = 'Vui lòng nhập tên lớp.';
             } elseif ($updateSchedule && (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $scheduleApplyDate) || $scheduleApplyDate < date('Y-m-d') || ($totalSessions > 0 && (!$plannedDays || !preg_match('/^\d{2}:\d{2}$/', $plannedStartTime) || !preg_match('/^\d{2}:\d{2}$/', $plannedEndTime) || $plannedStartTime >= $plannedEndTime)))) {
                 $_SESSION['error'] = 'Lịch mới cần có số buổi, thứ học, ngày áp dụng (từ hôm nay) và khung giờ hợp lệ.';
+            } elseif ($updateSchedule && $totalSessions > 0 && $useSecondDailyShift && (!preg_match('/^\d{2}:\d{2}$/', $plannedSecondStartTime) || !preg_match('/^\d{2}:\d{2}$/', $plannedSecondEndTime) || $plannedSecondStartTime >= $plannedSecondEndTime || $plannedSecondStartTime < $plannedEndTime)) {
+                $_SESSION['error'] = 'Ca thứ hai phải bắt đầu sau khi ca thứ nhất kết thúc và không được trùng giờ.';
             } else {
                 $pdo->beginTransaction();
                 try {
                     if ($updateSchedule) {
                         $pdo->prepare('DELETE FROM teaching_schedule_slots WHERE teaching_class_id=? AND teaching_date>=?')->execute([$classId, $scheduleApplyDate]);
-                        $pdo->prepare('UPDATE teaching_classes SET class_name=?, notes=?, teacher_id=?, time_shift=?, total_sessions=?, planned_weekdays=?, planned_start_date=?, planned_start_time=?, planned_end_time=? WHERE id=?')->execute([
+                        $pdo->prepare('UPDATE teaching_classes SET class_name=?, notes=?, teacher_id=?, time_shift=?, total_sessions=?, planned_weekdays=?, planned_start_date=?, planned_start_time=?, planned_end_time=?, planned_second_start_time=?, planned_second_end_time=? WHERE id=?')->execute([
                             $className, $notes ?: null, $teacherId, $timeShift,
                             $totalSessions ?: null, $plannedDays ? implode(',', $plannedDays) : null,
                             $totalSessions ? $scheduleApplyDate : null, $totalSessions ? $plannedStartTime : null, $totalSessions ? $plannedEndTime : null,
+                            $totalSessions && $useSecondDailyShift ? $plannedSecondStartTime : null, $totalSessions && $useSecondDailyShift ? $plannedSecondEndTime : null,
                             $classId,
                         ]);
                         if ($totalSessions > 0) appendPlannedSlots($pdo, $classId, (int) $_SESSION['user_id']);
@@ -749,7 +781,7 @@ require_once '../includes/header.php';
 <style>.schedule-table tbody tr.dragging{opacity:.45}.schedule-table tbody tr.drag-target td{box-shadow:inset 0 3px 0 #57b7ff}.class-drag{padding:4px 6px;border:1px dashed #6ea9d6;border-radius:7px;background:transparent;color:#9fd1fb;cursor:grab;line-height:1}.class-drag:active{cursor:grabbing}.class-order-status{display:inline-flex;align-items:center;gap:6px;margin-left:auto;color:var(--text-muted);font-size:12px}.class-order-status.saving{color:#ffd166}.class-order-status.saved{color:#42d6a5}.class-order-status.error{color:#ff7895}</style>
 <style>.schedule-layout{display:block}.schedule-layout>.schedule-card{display:block;width:100%;box-sizing:border-box}.create-class-dialog{width:min(620px,calc(100vw - 28px))}</style>
 <dialog class="schedule-dialog create-class-dialog" id="create-class-dialog"><form class="schedule-form" method="post"><?php echo csrfField(); ?><input type="hidden" name="action" value="create_class"><input type="hidden" name="month" value="<?php echo htmlspecialchars($month); ?>"><h2 class="dialog-title">Tạo nhóm lịch mới</h2><label>Tên hiển thị<input required name="class_name" maxlength="191" placeholder="Ví dụ: Ca Tin học tối"></label><?php if ($isAdmin): ?><label>Giáo viên phụ trách<select name="teacher_id"><option value="">Chưa phân công</option><?php foreach ($teachers as $teacher): ?><option value="<?php echo (int) $teacher['id']; ?>"><?php echo htmlspecialchars($teacher['name']); ?></option><?php endforeach; ?></select></label><?php endif; ?><fieldset class="shift-fieldset"><legend>Ca học</legend><div class="shift-options"><label class="shift-option shift-option-morning"><input type="radio" name="time_shift" value="morning" checked><span class="shift-icon">🌅</span><div><strong>Ca sáng</strong><small>8h – 11h</small></div></label><label class="shift-option shift-option-afternoon"><input type="radio" name="time_shift" value="afternoon"><span class="shift-icon">☀️</span><div><strong>Ca chiều</strong><small>14h – 17h</small></div></label><label class="shift-option shift-option-evening"><input type="radio" name="time_shift" value="evening"><span class="shift-icon">🌙</span><div><strong>Ca tối</strong><small>18h – 21h</small></div></label></div></fieldset><label>Danh sách hiển thị<textarea name="student_names" placeholder="Mỗi dòng một tên cần hiển thị trên lịch"></textarea></label><label>Ghi chú lịch<textarea name="notes" placeholder="Ví dụ: Phòng T357 · ghi chú ca dạy"></textarea></label><div class="dialog-actions"><button type="button" class="btn btn-outline" id="close-create-class">Hủy</button><button class="btn btn-primary"><i class='bx bx-save'></i> Tạo lịch</button></div></form></dialog>
-<style>.create-class-dialog input:not([type="checkbox"]):not([type="radio"]),.create-class-dialog select,.create-class-dialog textarea,.edit-schedule-fields input:not([type="checkbox"]):not([type="radio"]){box-sizing:border-box;background:var(--input-bg,#101c31)!important;color:var(--text-main)!important;border:1px solid var(--border-color)!important;border-radius:10px!important}.create-class-dialog input:not([type="checkbox"]):not([type="radio"]),.create-class-dialog select,.edit-schedule-fields input:not([type="checkbox"]):not([type="radio"]){min-height:48px;padding:11px 14px}.create-class-dialog input[name="total_sessions"]{max-width:180px}.create-class-dialog fieldset,.edit-schedule-fields{display:grid;gap:10px;margin:0;border:1px solid var(--border-color);border-radius:12px;padding:14px}.create-class-dialog legend,.edit-schedule-fields legend{padding:0 5px;font-weight:800}.create-class-dialog textarea[name="student_names"],.create-class-dialog textarea[name="notes"]{min-height:75px!important;height:75px}.weekday-label{font-weight:700}.weekday-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.weekday-options .weekday-option{display:flex!important;align-items:center;gap:8px;margin:0!important;padding:8px 10px;border:1px solid var(--border-color);border-radius:9px;font-weight:600!important;cursor:pointer}.weekday-options .weekday-option input{width:auto!important;margin:0!important;accent-color:var(--primary)}.weekday-options .weekday-option span{white-space:nowrap}.lesson-shift-select{grid-column:span 2}.lesson-shift-select small{margin-top:4px;color:var(--text-muted);font-weight:400;line-height:1.35}.edit-schedule-toggle{display:flex!important;align-items:center;gap:8px;font-weight:700!important;cursor:pointer}.edit-schedule-inputs{display:grid;gap:12px;opacity:.55}.edit-schedule-fields.is-enabled .edit-schedule-inputs{opacity:1}@media(max-width:520px){.weekday-options{grid-template-columns:repeat(2,minmax(0,1fr))}.lesson-shift-select{grid-column:auto}}
+<style>.create-class-dialog input:not([type="checkbox"]):not([type="radio"]),.create-class-dialog select,.create-class-dialog textarea,.edit-schedule-fields input:not([type="checkbox"]):not([type="radio"]){box-sizing:border-box;background:var(--input-bg,#101c31)!important;color:var(--text-main)!important;border:1px solid var(--border-color)!important;border-radius:10px!important}.create-class-dialog input:not([type="checkbox"]):not([type="radio"]),.create-class-dialog select,.edit-schedule-fields input:not([type="checkbox"]):not([type="radio"]){min-height:48px;padding:11px 14px}.create-class-dialog input[name="total_sessions"]{max-width:180px}.create-class-dialog fieldset,.edit-schedule-fields{display:grid;gap:10px;margin:0;border:1px solid var(--border-color);border-radius:12px;padding:14px}.create-class-dialog legend,.edit-schedule-fields legend{padding:0 5px;font-weight:800}.create-class-dialog textarea[name="student_names"],.create-class-dialog textarea[name="notes"]{min-height:75px!important;height:75px}.weekday-label{font-weight:700}.weekday-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.weekday-options .weekday-option{display:flex!important;align-items:center;gap:8px;margin:0!important;padding:8px 10px;border:1px solid var(--border-color);border-radius:9px;font-weight:600!important;cursor:pointer}.weekday-options .weekday-option input{width:auto!important;margin:0!important;accent-color:var(--primary)}.weekday-options .weekday-option span{white-space:nowrap}.lesson-shift-select{grid-column:span 2}.lesson-shift-select small{margin-top:4px;color:var(--text-muted);font-weight:400;line-height:1.35}.edit-schedule-toggle,.second-shift-toggle{display:flex!important;align-items:center;gap:8px;font-weight:700!important;cursor:pointer}.second-shift-toggle{padding:11px 13px!important;border:1px solid rgba(96,165,250,.45);border-radius:10px;background:rgba(37,99,235,.08)}.second-shift-toggle input{width:auto!important;margin:0!important;accent-color:var(--primary)}.second-shift-fields{display:grid;gap:10px;padding:12px;border:1px dashed rgba(96,165,250,.55);border-radius:11px;background:rgba(37,99,235,.055)}.second-shift-fields[hidden]{display:none!important}.second-shift-fields>strong{color:#bfdbfe}.second-shift-fields .time-grid{margin:0}.edit-schedule-inputs{display:grid;gap:12px;opacity:.55}.edit-schedule-fields.is-enabled .edit-schedule-inputs{opacity:1}@media(max-width:520px){.weekday-options{grid-template-columns:repeat(2,minmax(0,1fr))}.lesson-shift-select{grid-column:auto}}
 .shift-fieldset{border:1px solid var(--border-color)!important;border-radius:14px!important;padding:16px!important}.shift-options{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.shift-option{display:flex!important;align-items:center;gap:10px;padding:12px 14px!important;border:2px solid var(--border-color);border-radius:12px;cursor:pointer;transition:all .2s;margin:0!important;font-weight:400!important}.shift-option:hover{border-color:rgba(var(--primary-rgb),.5);background:rgba(var(--primary-rgb),.04)}.shift-option input[type="radio"]{width:auto!important;margin:0!important;accent-color:var(--primary)}.shift-option input[type="radio"]:checked ~ *{opacity:1}.shift-option:has(input:checked){border-color:var(--primary);background:rgba(var(--primary-rgb),.08);box-shadow:0 0 0 1px rgba(var(--primary-rgb),.2)}.shift-icon{font-size:22px;line-height:1}.shift-option div{display:grid;gap:2px}.shift-option strong{font-size:13px;line-height:1.2}.shift-option small{color:var(--text-muted);font-size:11px}
 .shift-label{position:sticky;top:52px;z-index:3;padding:8px 14px!important;height:auto!important;font-weight:800;font-size:13px;letter-spacing:.5px;background:var(--shift-color,#2563eb)!important;color:#fff!important;border-bottom:2px solid color-mix(in srgb,var(--shift-color) 80%,#000)!important;text-align:left!important}
 .shift-zone.shift-morning td{background:rgba(37,99,235,.04)}.shift-zone.shift-morning td.info-cell{background:color-mix(in srgb,var(--sidebar-bg) 96%,#2563eb)}
@@ -787,13 +819,17 @@ require_once '../includes/header.php';
     '<a class="btn btn-outline" href="' + withScope(<?php echo json_encode($nextWeek); ?>) + '" title="Tuần sau">›</a>';
   control.after(nav);
   const exportButton = document.createElement('a');
-  exportButton.className = 'btn btn-outline weekly-export';
+  exportButton.className = 'btn btn-outline schedule-export';
   exportButton.href = 'export_weekly_schedule.php?date=' + encodeURIComponent(selectedDate) + (scope ? '&scope=' + encodeURIComponent(scope) : '');
-  exportButton.innerHTML = "<i class='bx bx-spreadsheet'></i> Xuất Excel";
-  nav.after(exportButton);
+  exportButton.innerHTML = "<i class='bx bx-spreadsheet'></i> Xuất tuần";
+  const monthExportButton = document.createElement('a');
+  monthExportButton.className = 'btn btn-outline schedule-export month-export';
+  monthExportButton.href = 'export_weekly_schedule.php?period=month&date=' + encodeURIComponent(selectedDate) + (scope ? '&scope=' + encodeURIComponent(scope) : '');
+  monthExportButton.innerHTML = "<i class='bx bx-calendar'></i> Xuất cả tháng";
+  nav.after(exportButton, monthExportButton);
 })();
 </script>
-<style>.month-control input[type="date"]{width:170px!important;min-height:42px;padding:8px 10px;border:1px solid transparent!important;border-radius:8px;background:transparent!important;color:var(--text-main)!important;font:700 14px inherit;cursor:pointer}.month-control input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(1);opacity:.9;cursor:pointer}.week-nav{display:flex;align-items:center;gap:8px}.week-nav .btn,.weekly-export{min-height:42px;padding:8px 13px}.weekly-export{display:inline-flex;align-items:center;gap:6px}</style>
+<style>.month-control input[type="date"]{width:170px!important;min-height:42px;padding:8px 10px;border:1px solid transparent!important;border-radius:8px;background:transparent!important;color:var(--text-main)!important;font:700 14px inherit;cursor:pointer}.month-control input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(1);opacity:.9;cursor:pointer}.week-nav{display:flex;align-items:center;gap:8px}.week-nav .btn,.schedule-export{min-height:42px;padding:8px 13px}.schedule-export{display:inline-flex;align-items:center;gap:6px}.month-export{border-color:#22c55e;color:#86efac}.month-export:hover{background:rgba(34,197,94,.14)}</style>
 <script>
 (() => {
   const dialog = document.getElementById('schedule-dialog');
@@ -872,6 +908,8 @@ document.addEventListener('click', (event) => {
   createForm.insertAdjacentHTML('afterbegin', '<input type="hidden" name="scope" value="<?php echo $showOwnSchedule ? 'mine' : 'all'; ?>">');
   const plannedSchedule = document.createElement('fieldset');
   plannedSchedule.innerHTML = `<legend>Lịch học dự kiến <small>(tự tạo lịch)</small></legend><label>Số buổi<input type="number" name="total_sessions" min="0" max="500" value="0"><small>Để 0 nếu chưa muốn tự tạo lịch.</small></label><div class="weekday-label">Thứ học</div><div class="weekday-options"><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="1" checked><span>Thứ 2</span></label><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="2"><span>Thứ 3</span></label><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="3" checked><span>Thứ 4</span></label><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="4"><span>Thứ 5</span></label><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="5" checked><span>Thứ 6</span></label><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="6"><span>Thứ 7</span></label><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="7"><span>Chủ nhật</span></label></div><div class="time-grid"><label>Ngày bắt đầu<input type="date" name="planned_start_date" value="<?php echo date('Y-m-d'); ?>"></label><label class="lesson-shift-select">Chọn nhanh ca dạy<select name="planned_shift"><option value="morning">🌅 Ca sáng · 08:00 – 11:00</option><option value="afternoon">☀️ Ca chiều · 14:00 – 17:00</option><option value="evening">🌙 Ca tối · 18:00 – 21:00</option><option value="custom">✏️ Giờ tùy chỉnh</option></select><small>Chọn ca để điền nhanh giờ; vẫn có thể sửa trực tiếp bên dưới.</small></label><label>Giờ bắt đầu<input type="time" name="planned_start_time" value="08:00"></label><label>Giờ kết thúc<input type="time" name="planned_end_time" value="11:00"></label></div><div class="custom-shift-form"><strong><i class='bx bx-plus-circle'></i> Tạo ca mới</strong><label>Tên ca<input type="text" maxlength="80" id="new-shift-name" placeholder="Ví dụ: Ca trưa"></label><label>Bắt đầu<input type="time" id="new-shift-start" value="12:00"></label><label>Kết thúc<input type="time" id="new-shift-end" value="13:30"></label><button type="button" class="btn btn-outline" id="save-shift-preset">Lưu ca</button></div>`;
+  plannedSchedule.querySelector('.time-grid').insertAdjacentHTML('afterend', `<label class="second-shift-toggle"><input type="checkbox" name="use_second_daily_shift" value="1" id="use-second-daily-shift"> Một ngày học 2 ca liên tiếp</label><div class="second-shift-fields" id="second-shift-fields" hidden><strong><i class='bx bx-time-five'></i> Ca thứ hai trong cùng ngày</strong><label>Chọn nhanh ca thứ hai<select name="planned_second_shift"><option value="morning">🌅 Ca sáng · 08:00 – 11:00</option><option value="afternoon" selected>☀️ Ca chiều · 14:00 – 17:00</option><option value="evening">🌙 Ca tối · 18:00 – 21:00</option><option value="custom">✏️ Giờ tùy chỉnh</option></select></label><div class="time-grid"><label>Giờ bắt đầu ca 2<input type="time" name="planned_second_start_time" value="14:00"></label><label>Giờ kết thúc ca 2<input type="time" name="planned_second_end_time" value="17:00"></label></div><small class="schedule-note">Ca thứ hai diễn ra cùng ngày, phải bắt đầu sau khi ca thứ nhất kết thúc.</small></div>`);
+  plannedSchedule.querySelector('input[name="total_sessions"]')?.closest('label')?.querySelector('small')?.replaceChildren(document.createTextNode('Tính theo từng ca. Ví dụ: 10 buổi với 2 ca/ngày sẽ tạo 5 ngày học. Để 0 nếu chưa muốn tự tạo lịch.'));
   createForm.querySelector('.dialog-actions').before(plannedSchedule);
   // Không chọn sẵn ngày nào: người tạo lớp tự chọn đúng lịch học thực tế.
   plannedSchedule.querySelectorAll('input[name="planned_weekdays[]"]').forEach((input) => { input.checked = false; });
@@ -880,25 +918,34 @@ document.addEventListener('click', (event) => {
   const shiftDefaults = {morning: {start: '08:00', end: '11:00'}, afternoon: {start: '14:00', end: '17:00'}, evening: {start: '18:00', end: '21:00'}};
   const shiftRadios = createForm.querySelectorAll('input[name="time_shift"]');
   const plannedShiftSelect = plannedSchedule.querySelector('select[name="planned_shift"]');
+  const secondShiftToggle = plannedSchedule.querySelector('#use-second-daily-shift');
+  const secondShiftFields = plannedSchedule.querySelector('#second-shift-fields');
+  const plannedSecondShiftSelect = plannedSchedule.querySelector('select[name="planned_second_shift"]');
   const customShiftPresets = <?php echo json_encode($customShiftPresets, JSON_UNESCAPED_UNICODE); ?>;
   const plannedStartInput = plannedSchedule.querySelector('input[name="planned_start_time"]');
   const plannedEndInput = plannedSchedule.querySelector('input[name="planned_end_time"]');
+  const plannedSecondStartInput = plannedSchedule.querySelector('input[name="planned_second_start_time"]');
+  const plannedSecondEndInput = plannedSchedule.querySelector('input[name="planned_second_end_time"]');
   const applyShiftDefaults = (shift) => {
     const defaults = shiftDefaults[shift];
     if (!defaults || !plannedStartInput || !plannedEndInput) return;
     plannedStartInput.value = defaults.start;
     plannedEndInput.value = defaults.end;
   };
-  const addPresetOption = (preset, select = true) => {
-    if (!plannedShiftSelect) return;
+  const addPresetOptionTo = (selectElement, preset, select = false) => {
+    if (!selectElement) return;
     const option = document.createElement('option');
     option.value = 'preset:' + preset.id;
     option.textContent = '🕘 ' + preset.name + ' · ' + preset.start_time.slice(0, 5) + ' – ' + preset.end_time.slice(0, 5);
     option.dataset.start = preset.start_time.slice(0, 5);
     option.dataset.end = preset.end_time.slice(0, 5);
     option.dataset.majorShift = preset.major_shift || 'morning';
-    plannedShiftSelect.insertBefore(option, plannedShiftSelect.querySelector('option[value="custom"]'));
-    if (select) plannedShiftSelect.value = option.value;
+    selectElement.insertBefore(option, selectElement.querySelector('option[value="custom"]'));
+    if (select) selectElement.value = option.value;
+  };
+  const addPresetOption = (preset, select = true) => {
+    addPresetOptionTo(plannedShiftSelect, preset, select);
+    addPresetOptionTo(plannedSecondShiftSelect, preset, false);
   };
   customShiftPresets.forEach((preset) => addPresetOption(preset, false));
   const shiftDialog = document.createElement('dialog');
@@ -942,6 +989,7 @@ document.addEventListener('click', (event) => {
       if (!radio.checked) return;
       if (plannedShiftSelect) plannedShiftSelect.value = radio.value;
       applyShiftDefaults(radio.value);
+      if (secondShiftToggle.checked && plannedSecondStartInput.value < plannedEndInput.value) suggestSecondShift();
     });
   });
   plannedShiftSelect?.addEventListener('change', () => {
@@ -952,11 +1000,53 @@ document.addEventListener('click', (event) => {
       plannedEndInput.value = option.dataset.end;
       const classShift = createForm.querySelector('input[name="time_shift"][value="' + option.dataset.majorShift + '"]');
       if (classShift) classShift.checked = true;
+      if (secondShiftToggle.checked && plannedSecondStartInput.value < plannedEndInput.value) suggestSecondShift();
       return;
     }
     const classShift = createForm.querySelector('input[name="time_shift"][value="' + plannedShiftSelect.value + '"]');
     if (classShift) classShift.checked = true;
     applyShiftDefaults(plannedShiftSelect.value);
+    if (secondShiftToggle.checked && plannedSecondStartInput.value < plannedEndInput.value) suggestSecondShift();
+  });
+  const applySecondShift = () => {
+    if (plannedSecondShiftSelect.value === 'custom') return;
+    if (plannedSecondShiftSelect.value.startsWith('preset:')) {
+      const option = plannedSecondShiftSelect.selectedOptions[0];
+      plannedSecondStartInput.value = option.dataset.start;
+      plannedSecondEndInput.value = option.dataset.end;
+      return;
+    }
+    const defaults = shiftDefaults[plannedSecondShiftSelect.value];
+    if (defaults) {
+      plannedSecondStartInput.value = defaults.start;
+      plannedSecondEndInput.value = defaults.end;
+    }
+  };
+  const suggestSecondShift = () => {
+    const candidate = Object.entries(shiftDefaults).find(([, range]) => range.start >= plannedEndInput.value);
+    if (!candidate) return;
+    plannedSecondShiftSelect.value = candidate[0];
+    plannedSecondStartInput.value = candidate[1].start;
+    plannedSecondEndInput.value = candidate[1].end;
+  };
+  const syncSecondShiftFields = () => {
+    const enabled = secondShiftToggle.checked;
+    secondShiftFields.hidden = !enabled;
+    secondShiftFields.querySelectorAll('input,select').forEach((input) => { input.disabled = !enabled; });
+    if (enabled && plannedSecondStartInput.value < plannedEndInput.value) suggestSecondShift();
+  };
+  secondShiftToggle.addEventListener('change', syncSecondShiftFields);
+  plannedSecondShiftSelect.addEventListener('change', applySecondShift);
+  [plannedSecondStartInput, plannedSecondEndInput].forEach((input) => input.addEventListener('change', () => { plannedSecondShiftSelect.value = 'custom'; }));
+  plannedEndInput.addEventListener('change', () => { if (secondShiftToggle.checked && plannedSecondStartInput.value < plannedEndInput.value) suggestSecondShift(); });
+  syncSecondShiftFields();
+  createForm.addEventListener('submit', (event) => {
+    if (!secondShiftToggle.checked) return;
+    if (!plannedSecondStartInput.value || !plannedSecondEndInput.value || plannedSecondStartInput.value >= plannedSecondEndInput.value || plannedSecondStartInput.value < plannedEndInput.value) {
+      event.preventDefault();
+      alert('Ca thứ hai phải bắt đầu sau khi ca thứ nhất kết thúc và không được trùng giờ.');
+      plannedSecondStartInput.focus();
+    }
   });
   [plannedStartInput, plannedEndInput].forEach((input) => input?.addEventListener('change', () => {
     if (plannedShiftSelect) plannedShiftSelect.value = 'custom';
@@ -992,14 +1082,36 @@ document.addEventListener('click', (event) => {
       <div class="weekday-options"><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="1"><span>Thứ 2</span></label><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="2"><span>Thứ 3</span></label><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="3"><span>Thứ 4</span></label><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="4"><span>Thứ 5</span></label><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="5"><span>Thứ 6</span></label><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="6"><span>Thứ 7</span></label><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="7"><span>Chủ nhật</span></label></div>
       <div class="time-grid"><label>Giờ bắt đầu<input type="time" name="planned_start_time" id="edit-planned-start-time"></label><label>Giờ kết thúc<input type="time" name="planned_end_time" id="edit-planned-end-time"></label></div>
     </div>`;
+  editSchedule.querySelector('.edit-schedule-inputs').insertAdjacentHTML('beforeend', `<label class="second-shift-toggle"><input type="checkbox" name="use_second_daily_shift" value="1" id="edit-use-second-daily-shift"> Một ngày học 2 ca liên tiếp</label><div class="second-shift-fields" id="edit-second-shift-fields" hidden><strong><i class='bx bx-time-five'></i> Ca thứ hai trong cùng ngày</strong><div class="time-grid"><label>Giờ bắt đầu ca 2<input type="time" name="planned_second_start_time" id="edit-planned-second-start-time"></label><label>Giờ kết thúc ca 2<input type="time" name="planned_second_end_time" id="edit-planned-second-end-time"></label></div><small class="schedule-note">Số buổi được tính theo từng ca; ca thứ hai không được trùng giờ ca thứ nhất.</small></div>`);
   noteLabel.after(editSchedule);
   const updateScheduleToggle = document.getElementById('edit-update-schedule');
   const editScheduleInputs = editSchedule.querySelector('.edit-schedule-inputs');
+  const editSecondShiftToggle = document.getElementById('edit-use-second-daily-shift');
+  const editSecondShiftFields = document.getElementById('edit-second-shift-fields');
+  const editSecondStartInput = document.getElementById('edit-planned-second-start-time');
+  const editSecondEndInput = document.getElementById('edit-planned-second-end-time');
+  const syncEditSecondShift = (scheduleEnabled = updateScheduleToggle.checked) => {
+    editSecondShiftFields.hidden = !editSecondShiftToggle.checked;
+    editSecondShiftFields.querySelectorAll('input,select').forEach((input) => {
+      input.disabled = !scheduleEnabled || !editSecondShiftToggle.checked;
+    });
+  };
   const setScheduleInputsEnabled = (enabled) => {
     editScheduleInputs.querySelectorAll('input').forEach((input) => { input.disabled = !enabled; });
     editSchedule.classList.toggle('is-enabled', enabled);
+    syncEditSecondShift(enabled);
   };
   updateScheduleToggle.addEventListener('change', () => setScheduleInputsEnabled(updateScheduleToggle.checked));
+  editSecondShiftToggle.addEventListener('change', () => syncEditSecondShift());
+  editForm.addEventListener('submit', (event) => {
+    if (!updateScheduleToggle.checked || !editSecondShiftToggle.checked) return;
+    const firstEnd = document.getElementById('edit-planned-end-time').value;
+    if (!editSecondStartInput.value || !editSecondEndInput.value || editSecondStartInput.value >= editSecondEndInput.value || editSecondStartInput.value < firstEnd) {
+      event.preventDefault();
+      alert('Ca thứ hai phải bắt đầu sau khi ca thứ nhất kết thúc và không được trùng giờ.');
+      editSecondStartInput.focus();
+    }
+  });
   setScheduleInputsEnabled(false);
   const jsonRequest = async (body) => {
     const response = await fetch(location.href, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({...body, csrf_token: token})});
@@ -1050,6 +1162,10 @@ document.addEventListener('click', (event) => {
         document.getElementById('edit-schedule-apply-date').value = <?php echo json_encode(date('Y-m-d')); ?>;
         document.getElementById('edit-planned-start-time').value = String(classData.planned_start_time || '08:00').slice(0, 5);
         document.getElementById('edit-planned-end-time').value = String(classData.planned_end_time || '11:00').slice(0, 5);
+        editSecondShiftToggle.checked = Boolean(classData.planned_second_start_time && classData.planned_second_end_time);
+        editSecondStartInput.value = String(classData.planned_second_start_time || '14:00').slice(0, 5);
+        editSecondEndInput.value = String(classData.planned_second_end_time || '17:00').slice(0, 5);
+        syncEditSecondShift(false);
         const plannedDays = String(classData.planned_weekdays || '').split(',');
         editSchedule.querySelectorAll('input[name="planned_weekdays[]"]').forEach((input) => { input.checked = plannedDays.includes(input.value); });
         const formActions = document.querySelector('#class-form .dialog-actions');

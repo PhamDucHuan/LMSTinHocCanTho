@@ -23,8 +23,19 @@ try {
 } catch (Throwable) {
     $anchorDay = new DateTimeImmutable('today');
 }
-$weekStart = $anchorDay->modify('-' . ((int) $anchorDay->format('N') - 1) . ' days');
-$weekEnd = $weekStart->modify('+6 days');
+$exportPeriod = (string) ($_GET['period'] ?? 'week');
+$isMonthExport = $exportPeriod === 'month';
+if ($isMonthExport) {
+    $rangeStart = $anchorDay->modify('first day of this month');
+    $rangeEnd = $anchorDay->modify('last day of this month');
+    $rangeTitle = 'THÁNG ' . $rangeStart->format('m/Y');
+    $rangeNoun = 'tháng';
+} else {
+    $rangeStart = $anchorDay->modify('-' . ((int) $anchorDay->format('N') - 1) . ' days');
+    $rangeEnd = $rangeStart->modify('+6 days');
+    $rangeTitle = 'TUẦN ' . $rangeStart->format('d/m/Y') . ' - ' . $rangeEnd->format('d/m/Y');
+    $rangeNoun = 'tuần';
+}
 
 $requestedTeacherId = filter_input(INPUT_GET, 'teacher_id', FILTER_VALIDATE_INT);
 $scope = (string) ($_GET['scope'] ?? '');
@@ -61,8 +72,8 @@ $sql =
      LEFT JOIN users owner ON owner.id=tc.teacher_id
      LEFT JOIN users replacement ON replacement.id=ts.substitute_teacher_id
      LEFT JOIN teaching_class_students tcs ON tcs.teaching_class_id=tc.id
-     WHERE tc.status='active' AND ts.teaching_date BETWEEN ? AND ?";
-$params = [$weekStart->format('Y-m-d'), $weekEnd->format('Y-m-d')];
+     WHERE " . ($isMonthExport ? '1=1' : "tc.status='active'") . " AND ts.teaching_date BETWEEN ? AND ?";
+$params = [$rangeStart->format('Y-m-d'), $rangeEnd->format('Y-m-d')];
 if ($teacherId !== null) {
     $sql .= ' AND (tc.teacher_id=? OR ts.substitute_teacher_id=?)';
     $params[] = $teacherId;
@@ -90,15 +101,24 @@ $classSql =
      LEFT JOIN courses c ON c.id=tc.course_id
      LEFT JOIN users owner ON owner.id=tc.teacher_id
      LEFT JOIN teaching_class_students tcs ON tcs.teaching_class_id=tc.id
-     WHERE tc.status='active'";
-$classParams = [];
+     WHERE " . ($isMonthExport
+        ? 'EXISTS (SELECT 1 FROM teaching_schedule_slots range_slot WHERE range_slot.teaching_class_id=tc.id AND range_slot.teaching_date BETWEEN ? AND ?)'
+        : "tc.status='active'");
+$classParams = $isMonthExport ? [$rangeStart->format('Y-m-d'), $rangeEnd->format('Y-m-d')] : [];
 if ($teacherId !== null) {
     $classSql .= ' AND (tc.teacher_id=? OR EXISTS (
         SELECT 1 FROM teaching_schedule_slots substitute_slot
-        WHERE substitute_slot.teaching_class_id=tc.id AND substitute_slot.substitute_teacher_id=?
-    ))';
+        WHERE substitute_slot.teaching_class_id=tc.id AND substitute_slot.substitute_teacher_id=?';
+    if ($isMonthExport) {
+        $classSql .= ' AND substitute_slot.teaching_date BETWEEN ? AND ?';
+    }
+    $classSql .= '))';
     $classParams[] = $teacherId;
     $classParams[] = $teacherId;
+    if ($isMonthExport) {
+        $classParams[] = $rangeStart->format('Y-m-d');
+        $classParams[] = $rangeEnd->format('Y-m-d');
+    }
 }
 $classSql .=
     " GROUP BY tc.id, tc.class_name, tc.time_shift, tc.sort_order, c.title, owner.name
@@ -153,9 +173,9 @@ foreach ($matrixClasses as $class) {
     }
     $matrixShiftGroups[$shift][] = $class;
 }
-$weekDays = [];
-for ($day = $weekStart; $day <= $weekEnd; $day = $day->modify('+1 day')) {
-    $weekDays[] = $day;
+$periodDays = [];
+for ($day = $rangeStart; $day <= $rangeEnd; $day = $day->modify('+1 day')) {
+    $periodDays[] = $day;
 }
 
 require_once __DIR__ . '/../includes/simple_xlsx.php';
@@ -169,7 +189,7 @@ $cell = static fn (mixed $value, int $style = 0, string $type = 'string'): array
 $summaryRows = [];
 $summaryMerges = ['A1:J1', 'A2:J2', 'A4:J4', 'A10:J10'];
 $summaryRows[] = ['height' => 30, 'cells' => [1 => $cell(
-    'TỔNG HỢP LỊCH DẠY TUẦN ' . $weekStart->format('d/m/Y') . ' - ' . $weekEnd->format('d/m/Y'),
+    'TỔNG HỢP LỊCH DẠY ' . $rangeTitle,
     1
 )]];
 $summaryRows[] = ['cells' => [1 => $cell(
@@ -201,7 +221,7 @@ foreach (['STT', 'Ngày', 'Thứ', 'Ca học', 'Giờ học', 'Lớp', 'Giáo vi
 
 if ($rows === []) {
     $emptyRowNumber = count($summaryRows) + 1;
-    $summaryRows[] = ['cells' => [1 => $cell('Không có buổi học trong tuần này.', 5)]];
+    $summaryRows[] = ['cells' => [1 => $cell('Không có buổi học trong ' . $rangeNoun . ' này.', 5)]];
     $summaryMerges[] = 'A' . $emptyRowNumber . ':J' . $emptyRowNumber;
 } else {
     $previousDetailDate = '';
@@ -235,15 +255,25 @@ if ($rows === []) {
     }
 }
 
+$excelColumnName = static function (int $column): string {
+    $name = '';
+    while ($column > 0) {
+        $column--;
+        $name = chr(65 + ($column % 26)) . $name;
+        $column = intdiv($column, 26);
+    }
+    return $name;
+};
+$matrixLastColumn = $excelColumnName(count($periodDays) + 1);
 $matrixRows = [];
-$matrixMerges = ['A1:H1', 'A2:H2'];
+$matrixMerges = ['A1:' . $matrixLastColumn . '1', 'A2:' . $matrixLastColumn . '2'];
 $matrixRows[] = ['height' => 30, 'cells' => [1 => $cell(
-    'BẢNG LỊCH DẠY TUẦN ' . $weekStart->format('d/m/Y') . ' - ' . $weekEnd->format('d/m/Y'),
+    'BẢNG LỊCH DẠY ' . $rangeTitle,
     1
 )]];
 $matrixRows[] = ['cells' => [1 => $cell('Phạm vi: ' . $teacherName, 2)]];
 $matrixRows[] = ['height' => 34, 'cells' => [1 => $cell('LỚP / HỌC VIÊN', 8)]];
-foreach ($weekDays as $index => $day) {
+foreach ($periodDays as $index => $day) {
     $isWeekend = (int) $day->format('N') >= 6;
     $matrixRows[2]['cells'][$index + 2] = $cell(
         $weekdayLabels[(int) $day->format('N') - 1] . "\n" . $day->format('d/m'),
@@ -257,12 +287,12 @@ foreach ($matrixShiftGroups as $shiftKey => $classesInShift) {
     $matrixRows[] = ['height' => 24, 'cells' => [
         1 => $cell($matrixShiftTitles[$shiftKey], $shiftStyleIds[$shiftKey]),
     ]];
-    $matrixMerges[] = 'A' . $shiftRowNumber . ':H' . $shiftRowNumber;
+    $matrixMerges[] = 'A' . $shiftRowNumber . ':' . $matrixLastColumn . $shiftRowNumber;
 
     if ($classesInShift === []) {
         $emptyRowNumber = count($matrixRows) + 1;
         $matrixRows[] = ['height' => 24, 'cells' => [1 => $cell('Chưa có lớp trong ca này.', 12)]];
-        $matrixMerges[] = 'A' . $emptyRowNumber . ':H' . $emptyRowNumber;
+        $matrixMerges[] = 'A' . $emptyRowNumber . ':' . $matrixLastColumn . $emptyRowNumber;
         continue;
     }
 
@@ -273,7 +303,7 @@ foreach ($matrixShiftGroups as $shiftKey => $classesInShift) {
             . ' · ' . (int) $class['student_count'] . ' học viên'
             . ((string) ($class['student_names'] ?? '') !== '' ? "\n" . (string) $class['student_names'] : '');
         $rowCells = [1 => $cell($classDescription, 10)];
-        foreach ($weekDays as $index => $day) {
+        foreach ($periodDays as $index => $day) {
             $cellTimes = $matrixSlots[(int) $class['id']][$day->format('Y-m-d')] ?? [];
             $rowCells[$index + 2] = $cell(implode("\n", $cellTimes), $cellTimes ? 11 : 12);
         }
@@ -290,9 +320,9 @@ $workbook->addSheet(
     ['freeze_rows' => 11]
 );
 $workbook->addSheet(
-    'Bảng lịch tuần',
+    $isMonthExport ? 'Bảng lịch tháng' : 'Bảng lịch tuần',
     $matrixRows,
-    [42, 18, 18, 18, 18, 18, 18, 18],
+    array_merge([42], array_fill(0, count($periodDays), 18)),
     $matrixMerges,
     ['freeze_rows' => 3, 'freeze_columns' => 1]
 );
@@ -305,7 +335,9 @@ if ($temporaryFile === false) {
 
 try {
     $workbook->save($temporaryFile);
-    $filename = 'lich-day-tuan-' . $weekStart->format('Y-m-d') . '-den-' . $weekEnd->format('Y-m-d') . '.xlsx';
+    $filename = $isMonthExport
+        ? 'lich-day-thang-' . $rangeStart->format('Y-m') . '.xlsx'
+        : 'lich-day-tuan-' . $rangeStart->format('Y-m-d') . '-den-' . $rangeEnd->format('Y-m-d') . '.xlsx';
     header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     header('Content-Disposition: attachment; filename="' . $filename . '"');
     header('Content-Length: ' . filesize($temporaryFile));
