@@ -41,8 +41,9 @@ function issueRememberLoginToken(PDO $pdo, int $userId): void
     $validator = bin2hex(random_bytes(32));
     $expires = time() + (LMS_REMEMBER_DAYS * 86400);
 
-    $pdo->prepare("DELETE FROM user_remember_tokens WHERE user_id = ? OR expires_at <= NOW()")
-        ->execute([$userId]);
+    // Mỗi trình duyệt/thiết bị giữ một token riêng. Không xóa token của cùng
+    // tài khoản vì thao tác đó sẽ làm laptop hoặc điện thoại còn lại bị đăng xuất.
+    $pdo->exec("DELETE FROM user_remember_tokens WHERE expires_at <= NOW()");
     $pdo->prepare(
         "INSERT INTO user_remember_tokens (user_id, selector, token_hash, expires_at)
          VALUES (?, ?, ?, ?)"
@@ -56,7 +57,7 @@ function issueRememberLoginToken(PDO $pdo, int $userId): void
     setcookie(LMS_REMEMBER_COOKIE, $selector . ':' . $validator, rememberCookieOptions($expires));
 }
 
-function restoreRememberedGoogleLogin(PDO $pdo): bool
+function restoreRememberedLogin(PDO $pdo): bool
 {
     if (!empty($_SESSION['user_id'])) return true;
     $token = parseRememberLoginCookie();
@@ -67,7 +68,7 @@ function restoreRememberedGoogleLogin(PDO $pdo): bool
 
     ensureRememberLoginTable($pdo);
     $stmt = $pdo->prepare(
-        "SELECT rt.user_id, rt.token_hash, u.name, u.role, u.avatar_url, u.google_id, u.is_locked, u.is_approved
+        "SELECT rt.user_id, rt.token_hash, u.name, u.email, u.role, u.avatar_url, u.is_locked, u.is_approved
          FROM user_remember_tokens rt
          INNER JOIN users u ON u.id = rt.user_id
          WHERE rt.selector = ? AND rt.expires_at > NOW()
@@ -76,7 +77,7 @@ function restoreRememberedGoogleLogin(PDO $pdo): bool
     $stmt->execute([$token['selector']]);
     $user = $stmt->fetch();
 
-    if (!$user || !empty($user['is_locked']) || empty($user['is_approved']) || empty($user['google_id'])
+    if (!$user || !empty($user['is_locked']) || empty($user['is_approved'])
         || !hash_equals((string) $user['token_hash'], hash('sha256', $token['validator']))) {
         $pdo->prepare("DELETE FROM user_remember_tokens WHERE selector = ?")->execute([$token['selector']]);
         clearRememberLoginCookie();
@@ -86,6 +87,7 @@ function restoreRememberedGoogleLogin(PDO $pdo): bool
     session_regenerate_id(true);
     $_SESSION['user_id'] = (int) $user['user_id'];
     $_SESSION['user_name'] = $user['name'];
+    $_SESSION['user_email'] = $user['email'];
     $_SESSION['user_role'] = $user['role'];
     $_SESSION['user_avatar'] = $user['avatar_url'] ?? null;
     require_once __DIR__ . '/login_history.php';
@@ -95,6 +97,14 @@ function restoreRememberedGoogleLogin(PDO $pdo): bool
     $pdo->prepare("DELETE FROM user_remember_tokens WHERE selector = ?")->execute([$token['selector']]);
     issueRememberLoginToken($pdo, (int) $user['user_id']);
     return true;
+}
+
+/**
+ * Tên cũ được giữ lại để các đường dẫn đang dùng không bị gián đoạn.
+ */
+function restoreRememberedGoogleLogin(PDO $pdo): bool
+{
+    return restoreRememberedLogin($pdo);
 }
 
 function revokeRememberLogin(PDO $pdo): void

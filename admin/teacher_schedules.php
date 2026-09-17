@@ -61,17 +61,26 @@ $slots = [];
 $totalSessions = 0;
 if ($teacherId > 0) {
     $classStmt = $pdo->prepare(
-        "SELECT tc.id, tc.class_name, tc.notes, tc.status, tc.time_shift, c.title AS course_title,
+        "SELECT tc.id, tc.class_name, tc.notes, tc.status, tc.time_shift, tc.total_sessions, c.title AS course_title,
                 GROUP_CONCAT(DISTINCT tcs.student_name ORDER BY tcs.student_name SEPARATOR ', ') AS students,
-                COUNT(DISTINCT tcs.id) AS student_count
+                COUNT(DISTINCT tcs.id) AS student_count,
+                COALESCE(progress.learned_sessions, 0) AS learned_sessions,
+                COALESCE(progress.scheduled_sessions, 0) AS scheduled_sessions
          FROM teaching_classes tc
          LEFT JOIN courses c ON c.id=tc.course_id
+         LEFT JOIN (
+             SELECT teaching_class_id,
+                    SUM(CASE WHEN makeup_student_id IS NULL AND attendance_status='present' THEN 1 ELSE 0 END) AS learned_sessions,
+                    SUM(CASE WHEN makeup_student_id IS NULL THEN 1 ELSE 0 END) AS scheduled_sessions
+             FROM teaching_schedule_slots
+             GROUP BY teaching_class_id
+         ) progress ON progress.teaching_class_id=tc.id
          LEFT JOIN teaching_class_students tcs ON tcs.teaching_class_id=tc.id
          WHERE tc.status='active' AND (tc.teacher_id=? OR EXISTS (
              SELECT 1 FROM teaching_schedule_slots substitute_slot
              WHERE substitute_slot.teaching_class_id=tc.id AND substitute_slot.substitute_teacher_id=?
          ))
-         GROUP BY tc.id, tc.class_name, tc.notes, tc.status, tc.time_shift, c.title, tc.sort_order
+         GROUP BY tc.id, tc.class_name, tc.notes, tc.status, tc.time_shift, tc.total_sessions, c.title, tc.sort_order, progress.learned_sessions, progress.scheduled_sessions
          ORDER BY FIELD(tc.time_shift, 'morning', 'afternoon', 'evening'), tc.sort_order, tc.id"
     );
     $classStmt->execute([$teacherId, $teacherId]);
@@ -113,6 +122,7 @@ require_once '../includes/header.php';
 .shift-empty{padding:18px 14px!important;text-align:center!important;color:var(--text-muted)!important;font-style:italic;height:auto!important;background:rgba(255,255,255,.02)!important}
 @media(max-width:900px){.schedule-card{padding:17px}.schedule-tools,.teacher-filter{width:100%}.teacher-filter label:first-child{min-width:100%;width:100%}.teacher-filter select{width:100%}.calendar-wrap{max-height:62vh}.schedule-table{width:940px;min-width:940px}.schedule-table th.info-head,.schedule-table td.class-info{width:210px;min-width:210px;max-width:210px}}
 </style>
+<style>.teacher-class-progress{display:inline-flex!important;width:max-content;align-items:center;gap:5px;margin-top:5px!important;padding:3px 7px;border:1px solid rgba(34,197,94,.38);border-radius:999px;background:rgba(34,197,94,.1);color:#86efac!important;font-weight:800}.teacher-class-progress.is-complete{border-color:rgba(250,204,21,.48);background:rgba(250,204,21,.1);color:#fde68a!important}</style>
 <main class="teacher-schedule-page">
     <h1><i class='bx bx-calendar-check'></i> Lịch của giáo viên</h1>
     <p class="schedule-note" style="margin:-8px 0 22px">Chọn giáo viên để xem toàn bộ lớp và lịch dạy theo tháng.</p>
@@ -158,8 +168,8 @@ $teacherShiftColors = ['morning' => '#2563eb', 'afternoon' => '#ea580c', 'evenin
             <?php foreach ($teacherShiftGroups as $shiftKey => $shiftClasses): ?>
                 <tr class="shift-header shift-<?php echo $shiftKey; ?>"><td colspan="<?php echo count($days)+1; ?>" class="shift-label" style="--shift-color:<?php echo $teacherShiftColors[$shiftKey]; ?>"><?php echo $teacherShiftLabels[$shiftKey]; ?></td></tr>
                 <?php if (empty($shiftClasses)): ?><tr class="shift-zone shift-<?php echo $shiftKey; ?>"><td colspan="<?php echo count($days)+1; ?>" class="shift-empty">Chưa có lớp nào trong ca này</td></tr><?php endif; ?>
-                <?php foreach ($shiftClasses as $class): $className=(string)($class['course_title'] ?: $class['class_name']); ?>
-                <tr class="shift-zone shift-<?php echo $shiftKey; ?>"><td class="class-info"><strong><?php echo htmlspecialchars($className); ?></strong><small><?php echo (int)$class['student_count']; ?> học viên</small><small><?php echo htmlspecialchars($class['students'] ?: 'Chưa nhập học viên'); ?></small><?php if (!empty($class['notes'])): ?><small class="class-note" title="<?php echo htmlspecialchars($class['notes'], ENT_QUOTES); ?>"><?php echo htmlspecialchars($class['notes']); ?></small><?php endif; ?></td>
+                <?php foreach ($shiftClasses as $class): $className=(string)($class['course_title'] ?: $class['class_name']); $learnedSessions=(int)$class['learned_sessions']; $totalClassSessions=(int)$class['total_sessions']>0?(int)$class['total_sessions']:(int)$class['scheduled_sessions']; ?>
+                <tr class="shift-zone shift-<?php echo $shiftKey; ?>"><td class="class-info"><strong><?php echo htmlspecialchars($className); ?></strong><small><?php echo (int)$class['student_count']; ?> học viên</small><small class="teacher-class-progress <?php echo $totalClassSessions > 0 && $learnedSessions >= $totalClassSessions ? 'is-complete' : ''; ?>"><i class='bx bx-check-circle'></i> <?php echo $learnedSessions; ?>/<?php echo $totalClassSessions; ?> buổi</small><small><?php echo htmlspecialchars($class['students'] ?: 'Chưa nhập học viên'); ?></small><?php if (!empty($class['notes'])): ?><small class="class-note" title="<?php echo htmlspecialchars($class['notes'], ENT_QUOTES); ?>"><?php echo htmlspecialchars($class['notes']); ?></small><?php endif; ?></td>
                 <?php foreach ($days as $day): $date=$day->format('Y-m-d'); $weekend=(int)$day->format('N')>=6; $isToday=$date===$today; ?><td class="<?php echo trim(($weekend ? 'weekend ' : '') . ($isToday ? 'today' : '')); ?>"><?php foreach ($slots[(int)$class['id']][$date] ?? [] as $slot): ?><span class="schedule-slot"><?php echo substr((string)$slot['start_time'],0,5); ?> – <?php echo substr((string)$slot['end_time'],0,5); ?></span><?php endforeach; ?></td><?php endforeach; ?></tr>
             <?php endforeach; ?>
             <?php endforeach; ?>

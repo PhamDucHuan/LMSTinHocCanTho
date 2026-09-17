@@ -5,7 +5,8 @@ require_once __DIR__ . '/login_history.php';
 secureSessionStart();
 try {
     require_once __DIR__ . '/../config/database.php';
-    markUserOffline($pdo, (int) ($_SESSION['user_id'] ?? 0));
+    // Không đánh dấu cả tài khoản offline vì tài khoản có thể vẫn đang hoạt động
+    // trên thiết bị khác. Danh sách online tự hết hạn theo last_seen_at.
     recordLoginHistory($pdo, !empty($_SESSION['user_id']) ? (int) $_SESSION['user_id'] : null, 'logout', 'logout', $_SESSION['user_email'] ?? null);
     revokeRememberLogin($pdo);
 } catch (Throwable $e) {

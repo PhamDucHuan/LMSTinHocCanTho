@@ -7,6 +7,7 @@ requireRole(['admin']);
 require_once '../config/database.php';
 require_once '../includes/tabular_import.php';
 require_once '../includes/google_forms.php';
+/** @var PDO $pdo */
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && str_contains((string) ($_SERVER['CONTENT_TYPE'] ?? ''), 'application/json')) {
     header('Content-Type: application/json; charset=utf-8');
@@ -108,6 +109,7 @@ require_once '../includes/header.php';
 .mapping-list{gap:6px;margin-top:12px}.mapping-row{grid-template-columns:minmax(220px,1fr) 24px minmax(220px,1fr);gap:8px;padding:9px 12px}.mapping-row .mapping-select{height:44px}.mapping-question small{margin-top:2px}.option-hint{margin-top:4px}.mapping-row-note{margin-top:-1px}@media(max-width:920px){.mapping-row{grid-template-columns:1fr}.mapping-arrow{transform:rotate(90deg)}}
 .preview-tools{margin:12px 0}.preview-table th,.preview-table td{padding:7px 12px}.preview-editor{gap:4px}.preview-edit-control{min-height:38px;height:38px;padding:6px 10px}.preview-source small{margin-top:2px}.preview-editor-footer{gap:5px}.preview-editor-note{font-size:10px;line-height:1.25}textarea.preview-edit-control{height:auto;min-height:58px}.preview-choice-grid{gap:5px 9px}.preview-choice-item{padding:5px 8px}.send-panel{margin-top:12px;padding:13px}.current-row-status{margin-bottom:10px}.send-buttons{gap:8px}.send-action{min-height:58px;padding:9px 15px}.send-footer{margin-top:8px}
 .send-panel .row-navigation{margin:12px 0 0;padding-top:12px;border-top:1px solid var(--border-color)}
+.mapping-row.is-google-managed{border-color:rgba(66,133,244,.32);background:rgba(66,133,244,.06)}.google-managed-badge{display:inline-flex;align-items:center;gap:4px;margin-left:7px;padding:3px 7px;border-radius:999px;background:rgba(66,133,244,.15);color:#8ab4f8;font-size:11px;vertical-align:middle}
 </style>
 <div class="gf-page">
   <section class="gf-hero">
@@ -150,10 +152,10 @@ require_once '../includes/header.php';
     <?php if ($result['form']['skipped']): ?><div class="gf-warning"><strong>Không thể điền sẵn:</strong> <?php echo htmlspecialchars(implode(', ', $result['form']['skipped'])); ?></div><?php endif; ?>
     <div class="mapping-list" id="mapping-list">
       <?php foreach ($result['form']['fields'] as $index => $field): ?>
-      <div class="mapping-row">
-        <div class="mapping-question"><strong><?php echo htmlspecialchars($field['label']); ?><?php if ($field['required']): ?> <span class="required-mark">*</span><?php endif; ?></strong><small><?php echo htmlspecialchars($field['type_label']); ?></small><?php if ($field['options']): ?><div class="option-hint">Giá trị hợp lệ: <?php echo htmlspecialchars(implode(' · ', array_slice($field['options'], 0, 8))); ?></div><?php endif; ?></div>
+      <div class="mapping-row<?php echo !empty($field['google_managed']) ? ' is-google-managed' : ''; ?>">
+        <div class="mapping-question"><strong><?php echo htmlspecialchars($field['label']); ?><?php if ($field['required']): ?> <span class="required-mark">*</span><?php endif; ?><?php if (!empty($field['google_managed'])): ?> <span class="google-managed-badge"><i class='bx bxl-google'></i> Google xác minh</span><?php endif; ?></strong><small><?php echo htmlspecialchars($field['type_label']); ?></small><?php if ($field['options']): ?><div class="option-hint">Giá trị hợp lệ: <?php echo htmlspecialchars(implode(' · ', array_slice($field['options'], 0, 8))); ?></div><?php endif; ?></div>
         <div class="mapping-arrow"><i class='bx bx-left-arrow-alt'></i></div>
-        <div class="mapping-source"><select class="mapping-select" data-field-index="<?php echo $index; ?>"><option value="">— Không lấy từ Excel —</option><?php foreach ($result['sheet']['headers'] as $column => $header): ?><option value="<?php echo $column; ?>"><?php echo htmlspecialchars($header); ?></option><?php endforeach; ?></select><?php if ($field['options']): ?><small class="mapping-row-note">Mỗi hàng dùng dữ liệu riêng từ Excel; bạn có thể chỉnh lựa chọn ở bước kiểm tra.</small><?php endif; ?></div>
+        <div class="mapping-source"><select class="mapping-select" data-field-index="<?php echo $index; ?>"><option value="">— Không lấy từ Excel —</option><?php foreach ($result['sheet']['headers'] as $column => $header): ?><option value="<?php echo $column; ?>"><?php echo htmlspecialchars($header); ?></option><?php endforeach; ?></select><?php if (!empty($field['google_managed'])): ?><small class="mapping-row-note">Sẽ điền trước từ Excel; Google có thể thay bằng email của tài khoản đang đăng nhập.</small><?php elseif ($field['options']): ?><small class="mapping-row-note">Mỗi hàng dùng dữ liệu riêng từ Excel; bạn có thể chỉnh lựa chọn ở bước kiểm tra.</small><?php endif; ?></div>
       </div>
       <?php endforeach; ?>
     </div>
@@ -195,9 +197,11 @@ require_once '../includes/header.php';
     const confirmButton = document.getElementById('confirm-sent');
     const undoButton = document.getElementById('undo-sent');
     const csrfToken = <?php echo json_encode(csrfToken()); ?>;
+    const requiresGoogleAccount = fields.some(field => field.google_managed);
     const storageKey = 'lms-google-form-progress:' + simpleHash(payload.form.url + '|' + payload.file_hash);
-    const mappingKey = storageKey + ':mapping';
-    const overridesKey = storageKey + ':overrides';
+    const fieldSchemaSuffix = fields.some(field => field.entry === 'emailAddress') ? ':email-v2' : '';
+    const mappingKey = storageKey + ':mapping' + fieldSchemaSuffix;
+    const overridesKey = storageKey + ':overrides' + fieldSchemaSuffix;
     let sent = readStoredJson(storageKey);
     let overrides = readStoredJson(overridesKey);
     const openedRows = {};
@@ -338,7 +342,7 @@ require_once '../includes/header.php';
         const control = document.createElement(field.type === 1 ? 'textarea' : 'input');
         control.className = 'preview-edit-control';
         if (control instanceof HTMLInputElement) {
-          control.type = field.type === 9 ? 'date' : (field.type === 10 ? 'time' : 'text');
+          control.type = field.type === 9 ? 'date' : (field.type === 10 ? 'time' : (field.entry === 'emailAddress' || normalise(field.label) === 'email' ? 'email' : 'text'));
           control.value = field.type === 9 ? dateInputValue(fieldValue.value) : fieldValue.value;
         } else control.value = fieldValue.value;
         control.placeholder = field.required ? 'Nhập dữ liệu bắt buộc' : 'Để trống nếu không cần điền';
@@ -379,7 +383,7 @@ require_once '../includes/header.php';
         const savedColumn = savedValue && typeof savedValue === 'object' ? savedValue.column : savedValue;
         if (savedColumn !== undefined && headers[savedColumn] !== undefined) select.value = String(savedColumn);
         else {
-          const label = fields[fieldIndex].label.split(/\s+—\s+/)[0];
+          const label = fields[fieldIndex].mapping_label || fields[fieldIndex].label.split(/\s+—\s+/)[0];
           let best = -1;
           let bestScore = 0;
           headers.forEach((header, column) => {
@@ -438,11 +442,11 @@ require_once '../includes/header.php';
       openButton.disabled = filledCount === 0 || isSubmitting;
       normalTabButton.disabled = filledCount === 0 || isSubmitting;
       openButton.querySelector('strong').textContent = wasOpened ? '1. Mở lại chế độ chia đôi' : '1. Mở chế độ chia đôi';
-      directButton.disabled = isSent || filledCount === 0 || isSubmitting;
+      directButton.disabled = requiresGoogleAccount || isSent || filledCount === 0 || isSubmitting;
       directButton.classList.toggle('is-loading', isSubmitting);
       directButton.querySelector('i').className = isSubmitting ? 'bx bx-loader-alt' : (isSent ? 'bx bx-check-circle' : 'bx bx-send');
-      directButton.querySelector('strong').textContent = isSubmitting ? 'Đang gửi lên Google Forms…' : (isSent ? 'Đã gửi lên Google Forms' : 'Gửi trực tiếp trên web');
-      directButton.querySelector('small').textContent = isSubmitting ? 'Vui lòng giữ nguyên trang trong giây lát' : (isSent ? 'Hàng này đã hoàn tất' : 'Gửi hàng này lên Google Forms ngay');
+      directButton.querySelector('strong').textContent = requiresGoogleAccount ? 'Cần mở Google Form để gửi' : (isSubmitting ? 'Đang gửi lên Google Forms…' : (isSent ? 'Đã gửi lên Google Forms' : 'Gửi trực tiếp trên web'));
+      directButton.querySelector('small').textContent = requiresGoogleAccount ? 'Google cần xác nhận email tài khoản đăng nhập' : (isSubmitting ? 'Vui lòng giữ nguyên trang trong giây lát' : (isSent ? 'Hàng này đã hoàn tất' : 'Gửi hàng này lên Google Forms ngay'));
       confirmButton.hidden = isSent || !wasOpened;
       confirmButton.disabled = isSubmitting;
       undoButton.hidden = !isSent;
@@ -450,7 +454,7 @@ require_once '../includes/header.php';
       undoButton.title = sent[current]?.method === 'direct' ? 'Thao tác này không xóa câu trả lời đã có trên Google Forms' : '';
       document.getElementById('send-hint').innerHTML = sentCount === rows.length
         ? '<span class="send-complete"><i class="bx bx-party"></i> Đã hoàn thành tất cả các hàng.</span>'
-        : (isSubmitting ? '<strong>Đang kết nối Google Forms và gửi dữ liệu…</strong>' : (isSent ? '<span class="send-complete"><i class="bx bx-check-circle"></i> Google Forms đã nhận dữ liệu hàng này.</span>' : (filledCount ? (wasOpened ? '<strong>Form đã mở:</strong> nếu đã bấm Gửi bên Google, hãy chọn “Tôi đã gửi thủ công”.' : 'Bạn có thể gửi ngay hoặc mở Form để kiểm tra trước.') : '<span class="preview-empty">Hãy nhập hoặc ánh xạ ít nhất một trường trước khi gửi.</span>')));
+        : (isSubmitting ? '<strong>Đang kết nối Google Forms và gửi dữ liệu…</strong>' : (isSent ? '<span class="send-complete"><i class="bx bx-check-circle"></i> Google Forms đã nhận dữ liệu hàng này.</span>' : (requiresGoogleAccount ? (wasOpened ? '<strong>Form đã mở:</strong> Google sẽ lấy email tài khoản đang đăng nhập; sau khi gửi hãy chọn “Tôi đã gửi thủ công”.' : '<strong>Form thu email tài khoản Google:</strong> hãy mở Form để Google xác nhận đúng tài khoản trước khi gửi.') : (filledCount ? (wasOpened ? '<strong>Form đã mở:</strong> nếu đã bấm Gửi bên Google, hãy chọn “Tôi đã gửi thủ công”.' : 'Bạn có thể gửi ngay hoặc mở Form để kiểm tra trước.') : '<span class="preview-empty">Hãy nhập hoặc ánh xạ ít nhất một trường trước khi gửi.</span>'))));
       document.getElementById('previous-row').disabled = current === 0 || isSubmitting;
       document.getElementById('next-row').disabled = current === rows.length - 1 || isSubmitting;
       document.getElementById('first-pending').disabled = sentCount === rows.length || isSubmitting;

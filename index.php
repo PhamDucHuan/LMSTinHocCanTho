@@ -8,7 +8,7 @@ if (!empty($_SESSION['pending_approval'])) {
 if (empty($_SESSION['user_id']) && isset($_COOKIE['lms_google_remember'])) {
     require_once __DIR__ . '/config/database.php';
     require_once __DIR__ . '/includes/remember_login.php';
-    if (restoreRememberedGoogleLogin($pdo)) {
+    if (restoreRememberedLogin($pdo)) {
         redirectToRoleDashboard((string) $_SESSION['user_role']);
     }
 }

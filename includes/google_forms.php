@@ -77,7 +77,9 @@ function submitPublicGoogleForm(string $formUrl, array $answers): array
 
     $pairs = [];
     foreach ($answers as $entry => $values) {
-        if (!is_string($entry) || !preg_match('/^entry\.\d+$/', $entry) || !is_array($values) || count($values) > 100) {
+        $isFormEntry = is_string($entry) && preg_match('/^entry\.\d+$/', $entry);
+        $isCollectedEmail = $entry === 'emailAddress';
+        if ((!$isFormEntry && !$isCollectedEmail) || !is_array($values) || count($values) > 100) {
             throw new RuntimeException('Dữ liệu trường Google Form không hợp lệ.');
         }
         foreach ($values as $value) {
@@ -145,6 +147,27 @@ function parsePublicGoogleForm(string $html, string $sourceUrl): array
     $fields = [];
     $skipped = [];
     $seen = [];
+
+    // Email do Google Forms thu thập nằm ngoài danh sách câu hỏi entry.*.
+    // Với chế độ email đã xác minh, Google khóa ô này và tự lấy từ tài khoản
+    // đang đăng nhập; vẫn cần đưa lên giao diện để người dùng thấy đủ trường.
+    if (preg_match('/<input\b(?=[^>]*\btype\s*=\s*["\']email["\'])[^>]*>/i', $html, $emailInputMatch)) {
+        $emailInput = $emailInputMatch[0];
+        $googleManaged = preg_match('/\sdisabled(?:\s|=|>)/i', $emailInput) === 1
+            || preg_match('/\baria-disabled\s*=\s*["\']true["\']/i', $emailInput) === 1;
+        $fields[] = [
+            'entry' => 'emailAddress',
+            'label' => $googleManaged ? 'Email tài khoản Google' : 'Email do Google Forms thu thập',
+            'mapping_label' => 'Email',
+            'type' => 0,
+            'type_label' => $googleManaged ? 'Google tự lấy từ tài khoản đang đăng nhập' : 'Email hệ thống của Google Forms',
+            'required' => preg_match('/\srequired(?:\s|=|>)/i', $emailInput) === 1,
+            'multiple' => false,
+            'options' => [],
+            'google_managed' => $googleManaged,
+        ];
+        $seen['emailAddress'] = true;
+    }
     foreach ($items as $item) {
         if (!is_array($item)) continue;
         $question = trim((string) ($item[1] ?? 'Câu hỏi'));

@@ -73,6 +73,7 @@ if (isset($_GET['code'])) {
         
         $_SESSION['user_id'] = $user['id'];
         $_SESSION['user_name'] = $user['name'];
+        $_SESSION['user_email'] = $user['email'];
         $_SESSION['user_role'] = $user['role'];
         $_SESSION['user_avatar'] = $avatar_url;
         recordLoginHistory($pdo, (int) $user['id'], 'login_google_success', 'google', $email);

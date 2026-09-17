@@ -5,6 +5,7 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/account_lock.php';
 require_once __DIR__ . '/audit.php';
 require_once __DIR__ . '/login_history.php';
+require_once __DIR__ . '/remember_login.php';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verifyCsrfToken();
@@ -108,8 +109,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             session_regenerate_id(true);
             $_SESSION['user_id'] = $user['id'];
             $_SESSION['user_name'] = $user['name'];
+            $_SESSION['user_email'] = $user['email'];
             $_SESSION['user_role'] = $user['role'];
             $_SESSION['user_avatar'] = $user['avatar_url'] ?? null;
+            if (!empty($_POST['remember'])) {
+                issueRememberLoginToken($pdo, (int) $user['id']);
+            } else {
+                // Chỉ bỏ ghi nhớ trên trình duyệt hiện tại; các thiết bị khác vẫn đăng nhập.
+                revokeRememberLogin($pdo);
+            }
             recordLoginHistory($pdo, (int) $user['id'], 'login_success', 'password', $email);
 
             if ($user['role'] === 'admin') {
