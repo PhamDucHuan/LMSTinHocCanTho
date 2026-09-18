@@ -863,7 +863,7 @@ $unreadNotifications ??= 0;
                         ['url' => '../teacher/question_bank.php', 'icon' => 'bx-library', 'label' => 'Ngân hàng câu hỏi', 'match' => ['teacher/question_bank.php']],
                     ]],
                     ['id' => 'class-management', 'label' => 'Quản lý lớp', 'icon' => 'bx-group', 'items' => [
-                        ['url' => '../admin/classes.php', 'icon' => 'bx-chalkboard', 'label' => 'Danh sách Lớp học', 'match' => ['admin/classes.php']],
+                        ['url' => '../admin/classes.php', 'icon' => 'bx-chalkboard', 'label' => 'Quản lý lớp học', 'match' => ['admin/classes.php', 'admin/class_detail.php']],
                     ]],
                     ['id' => 'teaching-schedule', 'label' => 'Lịch dạy', 'icon' => 'bx-calendar-event', 'items' => [
                         ['url' => '../admin/teaching_schedule.php?scope=all', 'icon' => 'bx-calendar-event', 'label' => 'Lịch dạy tổng', 'match' => ['admin/teaching_schedule.php']],
@@ -901,7 +901,7 @@ $unreadNotifications ??= 0;
                         ['url' => '../teacher/question_bank.php', 'icon' => 'bx-library', 'label' => 'Ngân hàng câu hỏi', 'match' => ['teacher/question_bank.php']],
                     ]],
                     ['id' => 'teacher-class-management', 'label' => 'Quản lý lớp', 'icon' => 'bx-group', 'items' => [
-                        ['url' => '../admin/classes.php', 'icon' => 'bx-chalkboard', 'label' => 'Danh sách Lớp học', 'match' => ['admin/classes.php']],
+                        ['url' => '../admin/classes.php', 'icon' => 'bx-chalkboard', 'label' => 'Quản lý lớp học', 'match' => ['admin/classes.php', 'admin/class_detail.php']],
                     ]],
                     ['id' => 'teacher-schedule', 'label' => 'Lịch dạy', 'icon' => 'bx-calendar-event', 'items' => [
                         ['url' => '../admin/teaching_schedule.php', 'icon' => 'bx-calendar-check', 'label' => 'Lịch dạy của tôi', 'match' => ['admin/teaching_schedule.php']],

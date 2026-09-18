@@ -5,7 +5,9 @@ require_once '../includes/security.php';
 secureSessionStart();
 requireRole(['admin']);
 require_once '../config/database.php';
+/** @var PDO $pdo */
 require_once '../includes/audit.php';
+require_once '../includes/quiz_answers.php';
 
 $statusOptions = [
     'open' => 'Mới báo cáo',
@@ -59,10 +61,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $questionText = trim((string) ($_POST['question_text'] ?? ''));
             $options = [];
             foreach (['a', 'b', 'c', 'd'] as $letter) $options[$letter] = trim((string) ($_POST['option_' . $letter] ?? ''));
-            $correct = strtoupper(trim((string) ($_POST['correct_option'] ?? '')));
+            $correct = quizNormalizeAnswerOptions($_POST['correct_option'] ?? '');
             $explanation = trim((string) ($_POST['explanation'] ?? ''));
             $note = trim((string) ($_POST['admin_note'] ?? ''));
-            if ($questionText === '' || in_array('', $options, true) || !in_array($correct, ['A', 'B', 'C', 'D'], true)) {
+            if ($questionText === '' || in_array('', $options, true) || $correct === '') {
                 throw new RuntimeException('Vui lòng nhập đầy đủ nội dung, bốn đáp án và đáp án đúng.');
             }
             if (mb_strlen($note, 'UTF-8') > 2000) throw new RuntimeException('Ghi chú quản trị không được dài quá 2.000 ký tự.');
@@ -130,11 +132,33 @@ require_once '../includes/header.php';
   <article class="report-card">
     <div class="report-head"><div><h2><?php echo htmlspecialchars($report['course_title']);?> · <?php echo htmlspecialchars($report['quiz_title']);?></h2><div class="report-meta"><span><?php echo htmlspecialchars($report['section_title']);?></span><span>Học viên: <strong><?php echo htmlspecialchars($report['student_name']);?></strong> · <?php echo htmlspecialchars($report['student_email']);?></span><span><?php echo date('d/m/Y H:i',strtotime($report['created_at']));?></span></div></div><span class="report-chip <?php echo htmlspecialchars($report['status']);?>"><?php echo htmlspecialchars($statusOptions[$report['status']]??$report['status']);?></span></div>
     <div class="report-detail"><strong><i class='bx bx-message-error'></i> <?php echo htmlspecialchars($reasonLabels[$report['reason']]??$report['reason']);?></strong><span><?php echo htmlspecialchars($report['details']?:'Học viên chưa ghi mô tả thêm.');?></span></div>
-    <div class="report-question-preview"><strong>Câu hỏi hiện tại: <?php echo nl2br(htmlspecialchars($report['question_text']));?></strong><ol type="A"><?php foreach(['a'=>'A','b'=>'B','c'=>'C','d'=>'D'] as $key=>$letter):?><li class="<?php echo $report['correct_option']===$letter?'correct':'';?>"><?php echo htmlspecialchars($report['option_'.$key]);?></li><?php endforeach;?></ol><?php if($report['explanation']):?><small style="display:block;margin-top:9px;color:var(--text-muted)"><strong>Giải thích:</strong> <?php echo htmlspecialchars($report['explanation']);?></small><?php endif;?></div>
+    <div class="report-question-preview"><strong>Câu hỏi hiện tại: <?php echo nl2br(htmlspecialchars($report['question_text']));?></strong><ol type="A"><?php foreach(['a'=>'A','b'=>'B','c'=>'C','d'=>'D'] as $key=>$letter):?><li class="<?php echo in_array($letter,quizAnswerOptions($report['correct_option']),true)?'correct':'';?>"><?php echo htmlspecialchars($report['option_'.$key]);?></li><?php endforeach;?></ol><small class="correct-answer-label" style="display:block;margin-top:9px;color:var(--success)"><strong>Đáp án đúng:</strong> <?php echo htmlspecialchars($report['correct_option']);?></small><?php if($report['explanation']):?><small style="display:block;margin-top:9px;color:var(--text-muted)"><strong>Giải thích:</strong> <?php echo htmlspecialchars($report['explanation']);?></small><?php endif;?></div>
     <div class="report-actions"><a class="btn btn-outline" href="../teacher/quizzes.php?course_id=<?php echo (int)$report['course_id'];?>&amp;quiz_id=<?php echo (int)$report['quiz_id'];?>"><i class='bx bx-link-external'></i> Mở đề</a><form method="post" class="report-status-form"><?php echo csrfField();?><input type="hidden" name="action" value="save_report_status"><input type="hidden" name="report_id" value="<?php echo (int)$report['id'];?>"><input type="hidden" name="return_status" value="<?php echo htmlspecialchars($statusFilter);?>"><select name="status"><?php foreach($statusOptions as $key=>$label):?><option value="<?php echo $key;?>" <?php echo $report['status']===$key?'selected':'';?>><?php echo $label;?></option><?php endforeach;?></select><input name="admin_note" value="<?php echo htmlspecialchars($report['admin_note']??'',ENT_QUOTES,'UTF-8');?>" placeholder="Ghi chú xử lý"><button class="btn btn-outline"><i class='bx bx-save'></i> Lưu trạng thái</button></form></div>
     <details class="report-edit"><summary><i class='bx bx-edit'></i> Sửa câu hỏi và hoàn tất báo cáo</summary><form method="post" class="report-edit-form"><?php echo csrfField();?><input type="hidden" name="action" value="update_reported_question"><input type="hidden" name="report_id" value="<?php echo (int)$report['id'];?>"><input type="hidden" name="return_status" value="<?php echo htmlspecialchars($statusFilter);?>"><label class="wide">Nội dung câu hỏi<textarea name="question_text" required><?php echo htmlspecialchars($report['question_text']);?></textarea></label><?php foreach(['a'=>'A','b'=>'B','c'=>'C','d'=>'D'] as $key=>$letter):?><label>Đáp án <?php echo $letter;?><input name="option_<?php echo $key;?>" value="<?php echo htmlspecialchars($report['option_'.$key],ENT_QUOTES,'UTF-8');?>" required></label><?php endforeach;?><label>Đáp án đúng<select name="correct_option"><?php foreach(['A','B','C','D'] as $letter):?><option value="<?php echo $letter;?>" <?php echo $report['correct_option']===$letter?'selected':'';?>><?php echo $letter;?></option><?php endforeach;?></select></label><label class="wide">Giải thích cho học viên<textarea name="explanation"><?php echo htmlspecialchars($report['explanation']??'');?></textarea></label><label class="wide">Ghi chú xử lý<textarea name="admin_note" placeholder="Ví dụ: Đã đổi đáp án đúng từ B sang C."><?php echo htmlspecialchars($report['admin_note']??'');?></textarea></label><div class="report-edit-buttons"><small style="color:var(--text-muted)">Lưu sẽ cập nhật câu hỏi trong đề và chuyển báo cáo sang “Đã xử lý”.</small><button class="btn btn-primary"><i class='bx bx-check-circle'></i> Lưu câu hỏi &amp; hoàn tất</button></div></form></details>
   </article>
   <?php endforeach;?>
   <?php if(!$reports):?><section class="report-empty"><i class='bx bx-check-double' style="font-size:32px;display:block;margin-bottom:8px"></i>Không có báo cáo câu hỏi phù hợp.</section><?php endif;?>
 </div>
+<script>
+document.querySelectorAll('.report-edit-form select[name="correct_option"]').forEach(select => {
+    const label = select.closest('.report-card')?.querySelector('.correct-answer-label');
+    const current = label ? label.textContent.replace(/^\s*Đáp án đúng:\s*/i, '').trim() : select.value;
+    const selected = new Set(current.split(',').map(value => value.trim()).filter(Boolean));
+    const group = document.createElement('span');
+    group.style.cssText = 'display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0';
+    ['A','B','C','D'].forEach(letter => {
+        const optionLabel = document.createElement('label');
+        optionLabel.style.cssText = 'display:inline-flex;grid-auto-flow:column;align-items:center;gap:6px;cursor:pointer';
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.name = 'correct_option[]';
+        input.value = letter;
+        input.checked = selected.has(letter);
+        input.style.width = '18px';
+        optionLabel.append(input, document.createTextNode(letter));
+        group.appendChild(optionLabel);
+    });
+    select.replaceWith(group);
+});
+</script>
 <?php require_once '../includes/footer.php';?>

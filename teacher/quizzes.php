@@ -3,6 +3,7 @@
     secureSessionStart();
     require_once '../config/database.php';
     require_once '../includes/quiz_import.php';
+    require_once '../includes/quiz_answers.php';
     require_once '../includes/friendly_urls.php';
     require_once '../includes/notifications.php';
     require_once '../includes/audit.php';
@@ -277,8 +278,8 @@
                             throw new RuntimeException("Dòng {$line}, cột " . chr(65 + $contentColumn) . ' phải có chữ hoặc hình ảnh.');
                         }
                     }
-                    $row[5] = strtoupper($row[5]);
-                    if (!in_array($row[5], ['A', 'B', 'C', 'D'], true)) throw new RuntimeException("Dòng {$line} có đáp án đúng không hợp lệ.");
+                    $row[5] = quizNormalizeAnswerOptions($row[5]);
+                    if ($row[5] === '') throw new RuntimeException("Dòng {$line} có đáp án đúng không hợp lệ. Hãy dùng A, B hoặc nhiều đáp án như A,D.");
                     $rows[] = ['values' => $row, 'images' => $images];
                 }
                 if (!$rows) throw new RuntimeException('File không có câu hỏi.');
@@ -316,8 +317,8 @@
                     trim((string) ($_POST['option_c'] ?? '')),
                     trim((string) ($_POST['option_d'] ?? '')),
                 ];
-                $correct = strtoupper(trim((string) ($_POST['correct_option'] ?? '')));
-                if (!in_array($correct, ['A','B','C','D'], true)) throw new RuntimeException('Đáp án đúng phải là A, B, C hoặc D.');
+                $correct = quizNormalizeAnswerOptions($_POST['correct_option'] ?? '');
+                if ($correct === '') throw new RuntimeException('Hãy chọn ít nhất một đáp án đúng.');
                 $points = max(0.1, min(100, (float) ($_POST['points'] ?? 1)));
                 $difficulty = in_array($_POST['difficulty'] ?? '', ['easy','medium','hard'], true)
                     ? $_POST['difficulty']
@@ -450,6 +451,7 @@
     .quiz-toggle input[type="checkbox"]::before{content:"";position:absolute;width:16px;height:16px;left:3px;top:3px;border-radius:50%;background:#cbd5e1;box-shadow:0 2px 5px rgba(0,0,0,.35);transition:transform .25s cubic-bezier(.22,1,.36,1),background .25s ease}
     .quiz-toggle input[type="checkbox"]:checked{border-color:var(--primary);background:var(--primary);box-shadow:0 0 0 3px rgba(var(--primary-rgb),.12)}
     .quiz-toggle input[type="checkbox"]:checked::before{transform:translateX(20px);background:#fff}
+    .correct-option-check input[type="checkbox"]{appearance:auto!important;-webkit-appearance:auto!important;flex:0 0 18px!important;width:18px!important;height:18px!important;border-radius:3px!important;accent-color:var(--primary);box-shadow:none!important}.correct-option-check input[type="checkbox"]::before{display:none!important}
     .quiz-toggle-grid{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:4px;padding:14px;border:1px solid var(--border-color);border-radius:12px;background:rgba(15,23,42,.35)}
     .quiz-toggle-grid .quiz-toggle{min-height:34px;margin:0!important}
     .quiz-category-manager{margin:18px 0 22px}.quiz-category-manager-head{display:flex;align-items:center;justify-content:space-between;gap:15px;flex-wrap:wrap}.quiz-category-create{display:flex;align-items:end;gap:10px;flex-wrap:wrap}.quiz-category-create .form-group{display:grid;gap:8px;min-width:min(360px,100%);margin:0}.quiz-category-create label{color:var(--text-main);font-size:14px;font-weight:600}.quiz-category-create input{width:100%;min-height:46px;padding:11px 14px;border:1px solid rgba(148,163,184,.22);border-radius:11px;background:rgba(15,23,42,.72);color:var(--text-main);font:inherit;outline:none}.quiz-category-create input:focus{border-color:var(--primary);box-shadow:0 0 0 4px rgba(var(--primary-rgb),.14)}.quiz-category-chips{display:flex;gap:9px;flex-wrap:wrap;margin-top:16px}.quiz-category-chip{display:flex;align-items:center;gap:8px;padding:8px 9px 8px 13px;border:1px solid var(--border-color);border-radius:999px;background:rgba(15,23,42,.45)}.quiz-category-chip strong{font-size:14px}.quiz-category-chip span{color:var(--text-muted);font-size:12px}.quiz-category-chip form{margin:0}.quiz-category-chip button{width:28px;height:28px;padding:0;border:0;border-radius:50%;display:grid;place-items:center;background:rgba(244,63,94,.12);color:var(--danger);cursor:pointer}.quiz-category-chip button:disabled{opacity:.35;cursor:not-allowed}
@@ -555,7 +557,7 @@
             </section>
             <section class="box" style="margin-bottom:18px;border-color:rgba(56,189,248,.3)">
                 <h3 style="margin-top:0"><i class='bx bx-upload'></i> Nhập câu hỏi bằng file CSV hoặc Excel</h3>
-                <p class="quiz-meta">Hỗ trợ .csv và .xlsx. File gồm: Câu hỏi, Đáp án A, B, C, D, Đáp án đúng (A/B/C/D). Có thể nhập thêm nhiều file vào cùng bài trắc nghiệm.</p>
+                <p class="quiz-meta">Hỗ trợ .csv và .xlsx. File gồm: Câu hỏi, Đáp án A, B, C, D, Đáp án đúng. Câu một đáp án ghi <strong>A</strong>; câu nhiều đáp án ghi dạng <strong>A,D</strong>. Có thể nhập thêm nhiều file vào cùng bài trắc nghiệm.</p>
                 <p><a href="../assets/templates/template_questions.csv" download style="color:var(--primary)"><i class='bx bx-download'></i> Tải file CSV mẫu</a></p>
                 <form method="post" enctype="multipart/form-data">
                     <?php echo csrfField(); ?>
@@ -590,7 +592,8 @@
                         <div class="form-group"><label>Độ khó</label><select name="difficulty"><?php foreach(['easy'=>'Dễ','medium'=>'Trung bình','hard'=>'Khó'] as $value=>$label):?><option value="<?php echo $value;?>" <?php echo ($question['difficulty']??'medium')===$value?'selected':'';?>><?php echo $label;?></option><?php endforeach;?></select></div>
                     </div>
                     <div class="form-group"><label>Giải thích đáp án</label><textarea name="explanation"><?php echo htmlspecialchars($question['explanation']??'');?></textarea></div>
-                    <div class="inline-actions"><select name="correct_option" style="width:auto"><?php foreach(['A','B','C','D'] as $letter):?><option <?php echo $question['correct_option']===$letter?'selected':'';?>><?php echo $letter;?></option><?php endforeach;?></select><button class="btn btn-primary">Lưu câu hỏi</button><button class="btn" name="action" value="delete_question" style="background:var(--danger);color:white" onclick="return confirm('Xóa câu hỏi này?')">Xóa</button></div>
+                    <?php $correctOptions=quizAnswerOptions($question['correct_option']); ?>
+                    <div class="inline-actions"><span style="font-weight:700">Đáp án đúng:</span><?php foreach(['A','B','C','D'] as $letter):?><label class="quiz-toggle correct-option-check" style="margin:0!important"><input type="checkbox" name="correct_option[]" value="<?php echo $letter;?>" <?php echo in_array($letter,$correctOptions,true)?'checked':'';?>> <span><?php echo $letter;?></span></label><?php endforeach;?><button class="btn btn-primary">Lưu câu hỏi</button><button class="btn" name="action" value="delete_question" style="background:var(--danger);color:white" onclick="return confirm('Xóa câu hỏi này?')">Xóa</button></div>
                 </form>
                 <?php endforeach;?>
             </section>

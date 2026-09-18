@@ -4,6 +4,7 @@ secureSessionStart();
 require_once '../config/database.php';
 require_once '../includes/friendly_urls.php';
 require_once '../includes/authorization.php';
+require_once '../includes/quiz_answers.php';
 /** @var PDO $pdo */
 if (!isset($_SESSION['user_id']) || $_SESSION['user_role'] !== 'student') {
     header('Location: ../index.php'); exit;
@@ -156,8 +157,8 @@ if($_SERVER['REQUEST_METHOD']==='POST' && ($_POST['action']??'')==='autosave' &&
     verifyCsrfToken();
     $answers=[];
     foreach($questions as $question){
-        $answer=strtoupper((string)($_POST['answer'][$question['id']]??''));
-        if(in_array($answer,['A','B','C','D'],true))$answers[(string)$question['id']]=$answer;
+        $answer=quizNormalizeAnswerOptions($_POST['answer'][$question['id']]??'');
+        if($answer!=='')$answers[(string)$question['id']]=$answer;
     }
     $stmt=$pdo->prepare('UPDATE quiz_attempts SET answers=?,last_saved_at=NOW() WHERE id=? AND student_id=? AND submitted_at IS NULL');
     $stmt->execute([json_encode($answers,JSON_UNESCAPED_UNICODE),$attemptId,$studentId]);
@@ -181,11 +182,11 @@ if($_SERVER['REQUEST_METHOD']==='POST' && ($_POST['action']??'')!=='toggle_pause
     verifyCsrfToken();
     $answers=[];$correct=0;$earnedPoints=0.0;$totalPoints=0.0;
     foreach($questions as $question){
-        $answer=strtoupper((string)($_POST['answer'][$question['id']]??''));
-        if(in_array($answer,['A','B','C','D'],true))$answers[(string)$question['id']]=$answer;
+        $answer=quizNormalizeAnswerOptions($_POST['answer'][$question['id']]??'');
+        if($answer!=='')$answers[(string)$question['id']]=$answer;
         $points=max(0.1,(float)($question['points']??1));
         $totalPoints+=$points;
-        if($answer===$question['correct_option']){$correct++;$earnedPoints+=$points;}
+        if(quizAnswerIsCorrect($answer,$question['correct_option'])){$correct++;$earnedPoints+=$points;}
     }
     $total=count($questions);$score=$totalPoints>0?round($earnedPoints/$totalPoints*10,2):0;
     $stmt=$pdo->prepare('UPDATE quiz_attempts SET answers=?,correct_count=?,total_questions=?,score=?,submitted_at=NOW() WHERE id=? AND submitted_at IS NULL');
@@ -204,7 +205,7 @@ require_once '../includes/header.php';
 <style>
 .quiz-top{position:sticky;top:8px;z-index:40;display:flex;justify-content:space-between;align-items:center;gap:15px;flex-wrap:wrap;margin-bottom:18px}.quiz-clock{font-size:22px;font-weight:700;color:#fbbf24}.quiz-timer-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .quiz-section{margin-bottom:20px}.quiz-question{padding:20px;border:1px solid var(--border-color);border-radius:12px;margin-top:12px}.quiz-options{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
-.quiz-option{display:flex;align-items:flex-start;gap:12px;min-height:54px;padding:14px;border:1px solid var(--border-color);border-radius:9px;cursor:pointer}.quiz-option input[type="radio"]{width:22px;height:22px;min-width:22px;margin:1px 0 0;accent-color:var(--primary);cursor:pointer}.quiz-option:hover{border-color:var(--primary)}.quiz-option:has(input:checked){border-color:var(--primary);background:rgba(var(--primary-rgb),.1)}.quiz-option.correct{border-color:var(--success);background:rgba(16,185,129,.1)}.quiz-option.wrong{border-color:var(--danger);background:rgba(239,68,68,.1)}
+.quiz-option{display:flex;align-items:flex-start;gap:12px;min-height:54px;padding:14px;border:1px solid var(--border-color);border-radius:9px;cursor:pointer}.quiz-option input[type="radio"],.quiz-option input[type="checkbox"]{width:22px;height:22px;min-width:22px;margin:1px 0 0;accent-color:var(--primary);cursor:pointer}.quiz-option:hover{border-color:var(--primary)}.quiz-option:has(input:checked){border-color:var(--primary);background:rgba(var(--primary-rgb),.1)}.quiz-option.correct{border-color:var(--success);background:rgba(16,185,129,.1)}.quiz-option.wrong{border-color:var(--danger);background:rgba(239,68,68,.1)}.quiz-multiple-hint{margin:9px 0 0;color:var(--primary);font-size:13px;font-weight:700}
 .quiz-question-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}.quiz-question-heading>strong{min-width:0}.quiz-answer-status{flex:0 0 auto;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font-size:24px;font-weight:800}.quiz-answer-status.correct{color:#fff;background:var(--success);box-shadow:0 0 0 5px rgba(16,185,129,.12)}.quiz-answer-status.wrong{color:#fff;background:var(--danger);box-shadow:0 0 0 5px rgba(239,68,68,.12)}
 .quiz-question-image{display:block;max-width:min(100%,520px);max-height:320px;object-fit:contain;margin:14px 0;padding:6px;border-radius:9px;background:#fff}.quiz-option-content{min-width:0}.quiz-option-image{display:block;max-width:180px;max-height:120px;object-fit:contain;margin-top:8px;padding:4px;border-radius:6px;background:#fff}
 .quiz-confirm-overlay{position:fixed;inset:0;z-index:2100;display:grid;place-items:center;padding:18px;background:rgba(2,6,23,.62);backdrop-filter:blur(3px)}.quiz-confirm-overlay[hidden]{display:none}.quiz-confirm-dialog{width:min(390px,100%);padding:24px;border:1px solid var(--border-color);border-radius:16px;background:var(--sidebar-bg);box-shadow:0 25px 70px rgba(0,0,0,.42);text-align:center}.quiz-confirm-icon{width:54px;height:54px;margin:0 auto 13px;border-radius:50%;display:grid;place-items:center;background:rgba(245,158,11,.15);color:#fbbf24;font-size:30px}.quiz-confirm-actions{display:flex;justify-content:center;gap:10px;margin-top:20px}
@@ -221,7 +222,7 @@ require_once '../includes/header.php';
 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(csrfToken(), ENT_QUOTES, 'UTF-8');?>"><input type="hidden" name="quiz_id" value="<?php echo $quizId;?>"><input type="hidden" name="attempt_id" value="<?php echo $attemptId;?>">
 <?php if(!$attempt['submitted_at']):?><div class="box quiz-top"><div><strong><?php echo htmlspecialchars($quiz['course_title']);?></strong><div style="color:var(--text-muted)"><?php echo count($questions);?> câu hỏi</div></div><div class="quiz-timer-actions"><div class="quiz-clock"><i class='bx bx-time'></i> <span id="quiz-time"><?php echo gmdate('H:i:s',$remaining);?></span></div><button type="button" class="btn btn-outline" id="quiz-pause"><i class='bx <?php echo $isPaused?'bx-play':'bx-pause';?>'></i> <span><?php echo $isPaused?'Tiếp tục':'Tạm dừng';?></span></button></div><button type="button" class="btn btn-primary" id="quiz-submit-open">Nộp bài</button></div><?php endif;?>
 <section class="box quiz-section"><h2><i class='bx bx-help-circle'></i> Câu hỏi</h2>
-<?php $number=0;foreach($questions as $question):$number++;$questionChosen=$savedAnswers[(string)$question['id']]??'';$questionIsCorrect=$questionChosen===$question['correct_option'];?>
+<?php $number=0;foreach($questions as $question):$number++;$questionChosen=$savedAnswers[(string)$question['id']]??'';$chosenOptions=quizAnswerOptions($questionChosen);$correctOptions=quizAnswerOptions($question['correct_option']);$multipleCorrect=count($correctOptions)>1;$questionIsCorrect=quizAnswerIsCorrect($questionChosen,$question['correct_option']);?>
 <div class="quiz-question">
 <div class="quiz-question-heading">
   <strong>Câu <?php echo $number;?>. <?php echo htmlspecialchars($question['question_text']);?></strong>
@@ -235,10 +236,11 @@ require_once '../includes/header.php';
   </div>
 </div>
 <?php if(!empty($question['question_image'])):?><img class="quiz-question-image" src="../uploads/<?php echo htmlspecialchars($question['question_image']);?>" alt="Hình minh họa câu <?php echo $number;?>"><?php endif;?>
+<?php if($multipleCorrect&&!$attempt['submitted_at']):?><p class="quiz-multiple-hint"><i class='bx bx-check-square'></i> Câu này có nhiều đáp án đúng — hãy chọn tất cả đáp án phù hợp.</p><?php endif;?>
 <div class="quiz-options">
-<?php $displayOptionOrder=$storedOptionOrder[(string)$question['id']]??['A','B','C','D'];foreach($displayOptionOrder as $letter):$chosen=$questionChosen;$class='';if($attempt['submitted_at']){$class=$letter===$question['correct_option']?'correct':($letter===$chosen?'wrong':'');}?>
+<?php $displayOptionOrder=$storedOptionOrder[(string)$question['id']]??['A','B','C','D'];foreach($displayOptionOrder as $letter):$class='';if($attempt['submitted_at']){$class=in_array($letter,$correctOptions,true)?'correct':(in_array($letter,$chosenOptions,true)?'wrong':'');}?>
 <?php $optionImage=$question['option_'.strtolower($letter).'_image']??null;?>
-<label class="quiz-option <?php echo $class;?>"><input type="radio" name="answer[<?php echo (int)$question['id'];?>]" value="<?php echo $letter;?>" <?php echo $chosen===$letter?'checked':'';?> <?php echo $attempt['submitted_at']?'disabled':'';?>><span class="quiz-option-content"><strong><?php echo $letter;?>.</strong> <?php echo htmlspecialchars($question['option_'.strtolower($letter)]);?><?php if($optionImage):?><img class="quiz-option-image" src="../uploads/<?php echo htmlspecialchars($optionImage);?>" alt="Hình đáp án <?php echo $letter;?>"><?php endif;?></span></label>
+<label class="quiz-option <?php echo $class;?>"><input type="<?php echo $multipleCorrect?'checkbox':'radio';?>" name="answer[<?php echo (int)$question['id'];?>]<?php echo $multipleCorrect?'[]':'';?>" value="<?php echo $letter;?>" <?php echo in_array($letter,$chosenOptions,true)?'checked':'';?> <?php echo $attempt['submitted_at']?'disabled':'';?>><span class="quiz-option-content"><strong><?php echo $letter;?>.</strong> <?php echo htmlspecialchars($question['option_'.strtolower($letter)]);?><?php if($optionImage):?><img class="quiz-option-image" src="../uploads/<?php echo htmlspecialchars($optionImage);?>" alt="Hình đáp án <?php echo $letter;?>"><?php endif;?></span></label>
 <?php endforeach;?></div>
 <?php if($attempt['submitted_at']&&!empty($question['explanation'])):?><p style="margin:12px 0 0;color:var(--text-muted)"><strong>Giải thích:</strong> <?php echo htmlspecialchars($question['explanation']);?></p><?php endif;?>
 </div>

@@ -18,7 +18,7 @@ function ensureQuestionBankSchema(PDO $pdo): void
         difficulty ENUM('easy','medium','hard') NOT NULL DEFAULT 'medium',
         question_text TEXT NOT NULL,
         option_a TEXT NOT NULL, option_b TEXT NOT NULL, option_c TEXT NOT NULL, option_d TEXT NOT NULL,
-        correct_option ENUM('A','B','C','D') NOT NULL,
+        correct_option VARCHAR(15) NOT NULL,
         fingerprint CHAR(64) NOT NULL,
         usage_count INT UNSIGNED NOT NULL DEFAULT 0,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

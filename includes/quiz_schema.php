@@ -59,7 +59,7 @@ function ensureQuizSchema(PDO $pdo): void
             option_b_image VARCHAR(500) NULL,
             option_c_image VARCHAR(500) NULL,
             option_d_image VARCHAR(500) NULL,
-            correct_option ENUM('A','B','C','D') NOT NULL,
+            correct_option VARCHAR(15) NOT NULL,
             sort_order INT UNSIGNED NOT NULL DEFAULT 0,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             INDEX idx_quiz_questions_section (section_id),

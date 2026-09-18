@@ -7,6 +7,8 @@ require_once '../config/database.php';
 require_once '../includes/authorization.php';
 require_once '../includes/audit.php';
 
+/** @var PDO $pdo */
+
 $role = (string) ($_SESSION['user_role'] ?? '');
 $actorId = (int) ($_SESSION['user_id'] ?? 0);
 if (!in_array($role, ['admin', 'teacher', 'administrative_staff'], true) || $actorId <= 0) {
@@ -160,10 +162,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $classSql = "SELECT lc.id, lc.class_name, lc.course_id, lc.primary_teacher_id, lc.notes, lc.status, lc.created_at,
                     c.title AS course_title, primary_teacher.name AS primary_teacher_name,
-                    (SELECT GROUP_CONCAT(lct.teacher_id ORDER BY lct.teacher_id) FROM learning_class_teachers lct WHERE lct.learning_class_id=lc.id) AS teacher_ids,
                     (SELECT GROUP_CONCAT(t.name ORDER BY t.name SEPARATOR ', ') FROM learning_class_teachers lct JOIN users t ON t.id=lct.teacher_id WHERE lct.learning_class_id=lc.id) AS teacher_names,
-                    (SELECT GROUP_CONCAT(lcs.student_id ORDER BY lcs.student_id) FROM learning_class_students lcs WHERE lcs.learning_class_id=lc.id) AS student_ids,
-                    (SELECT GROUP_CONCAT(CONCAT(lcs.student_id, '=', COALESCE(DATE_FORMAT(lcs.exam_date, '%Y-%m-%d'), '')) ORDER BY lcs.student_id SEPARATOR '|') FROM learning_class_students lcs WHERE lcs.learning_class_id=lc.id) AS student_exam_dates,
                     (SELECT COUNT(*) FROM learning_class_students lcs WHERE lcs.learning_class_id=lc.id) AS student_count
              FROM learning_classes lc
              JOIN courses c ON c.id=lc.course_id
@@ -184,7 +183,7 @@ require_once '../includes/header.php';
 
 <div class="class-page-head">
   <div><h1><i class='bx bx-group'></i> Quản lý lớp học</h1><p>Lớp học quyết định khóa học, giáo viên giám sát và quyền làm bài của học viên. Trang này độc lập với lịch dạy.</p></div>
-  <button type="button" class="btn btn-primary" id="new-class" <?php echo $courses ? '' : 'disabled'; ?>><i class='bx bx-plus'></i> Tạo lớp</button>
+  <?php if ($courses): ?><a class="btn btn-primary" href="class_detail.php"><i class='bx bx-plus'></i> Tạo lớp</a><?php else: ?><button type="button" class="btn btn-primary" disabled><i class='bx bx-plus'></i> Tạo lớp</button><?php endif; ?>
 </div>
 <?php if (!$courses): ?><div class="alert alert-error">Bạn cần có quyền quản lý ít nhất một khóa học trước khi tạo lớp.</div><?php endif; ?>
 <?php if (!empty($_SESSION['success'])): ?><div class="alert alert-success"><?php echo htmlspecialchars((string) $_SESSION['success']); unset($_SESSION['success']); ?></div><?php endif; ?>
@@ -201,16 +200,17 @@ require_once '../includes/header.php';
     <?php if (!empty($class['notes'])): ?><div class="class-row"><i class='bx bx-note'></i><div><?php echo nl2br(htmlspecialchars($class['notes'])); ?></div></div><?php endif; ?>
     <div class="class-card-actions">
       <?php if ($canEditClass): ?>
-        <button type="button" class="btn btn-outline edit-class" data-class='<?php echo htmlspecialchars(json_encode($class, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), ENT_QUOTES); ?>'><i class='bx bx-edit'></i> Sửa</button>
+        <a class="btn btn-outline" href="class_detail.php?id=<?php echo (int) $class['id']; ?>"><i class='bx bx-cog'></i> Quản lý</a>
         <form method="post"><?php echo csrfField(); ?><input type="hidden" name="class_id" value="<?php echo (int) $class['id']; ?>"><input type="hidden" name="action" value="<?php echo $class['status'] === 'active' ? 'archive' : 'resume'; ?>"><button class="btn btn-outline"><i class='bx <?php echo $class['status'] === 'active' ? 'bx-archive' : 'bx-refresh'; ?>'></i> <?php echo $class['status'] === 'active' ? 'Lưu trữ' : 'Mở lại'; ?></button></form>
         <form method="post" onsubmit="return confirm('Xóa lớp này? Học viên sẽ mất quyền được cấp qua lớp.');"><?php echo csrfField(); ?><input type="hidden" name="class_id" value="<?php echo (int) $class['id']; ?>"><input type="hidden" name="action" value="delete"><button class="btn btn-outline"><i class='bx bx-trash'></i> Xóa</button></form>
-      <?php else: ?><span class="status-chip"><i class='bx bx-show'></i>&nbsp; Chỉ xem</span><?php endif; ?>
+      <?php else: ?><a class="btn btn-outline" href="class_detail.php?id=<?php echo (int) $class['id']; ?>"><i class='bx bx-show'></i> Xem lớp</a><?php endif; ?>
     </div>
   </article>
 <?php endforeach; ?>
 <?php if (!$classes): ?><div class="learning-card"><h2>Chưa có lớp học</h2><p style="color:var(--text-muted);margin:0">Nhấn “Tạo lớp” để phân học viên vào một khóa học.</p></div><?php endif; ?>
 </div>
 
+<?php if (false): // Giao diện tạo/sửa cũ; trang riêng hiện dùng class_detail.php. ?>
 <dialog class="class-modal" id="class-modal">
   <form method="post" id="learning-class-form">
     <?php echo csrfField(); ?><input type="hidden" name="action" id="class-action" value="create"><input type="hidden" name="class_id" id="class-id">
@@ -330,4 +330,5 @@ require_once '../includes/header.php';
   studentSearch.addEventListener('input', filterStudents);
 })();
 </script>
+<?php endif; ?>
 <?php require_once '../includes/footer.php'; ?>

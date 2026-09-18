@@ -221,7 +221,7 @@ CREATE TABLE IF NOT EXISTS quiz_questions (
     option_b_image VARCHAR(500) NULL,
     option_c_image VARCHAR(500) NULL,
     option_d_image VARCHAR(500) NULL,
-    correct_option ENUM('A','B','C','D') NOT NULL,
+    correct_option VARCHAR(15) NOT NULL,
     sort_order INT UNSIGNED NOT NULL DEFAULT 0,
     CONSTRAINT fk_quiz_questions_section FOREIGN KEY (section_id) REFERENCES quiz_sections(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;

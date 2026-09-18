@@ -6,6 +6,7 @@ requireRole(['teacher', 'administrative_staff', 'admin']);
 require_once '../config/database.php';
 require_once '../includes/question_bank.php';
 require_once '../includes/quiz_import.php';
+require_once '../includes/quiz_answers.php';
 require_once '../includes/friendly_urls.php';
 require_once '../includes/audit.php';
 require_once '../includes/authorization.php';
@@ -64,8 +65,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $question = [];
             foreach (['question_text','option_a','option_b','option_c','option_d'] as $field) $question[$field] = trim((string) ($_POST[$field] ?? ''));
             if (in_array('', $question, true)) throw new RuntimeException('Vui lòng nhập đầy đủ câu hỏi và bốn đáp án.');
-            $correct = strtoupper(trim((string) ($_POST['correct_option'] ?? '')));
-            if (!in_array($correct, ['A','B','C','D'], true)) throw new RuntimeException('Đáp án đúng không hợp lệ.');
+            $correct = quizNormalizeAnswerOptions($_POST['correct_option'] ?? '');
+            if ($correct === '') throw new RuntimeException('Hãy chọn ít nhất một đáp án đúng.');
             $topic = trim((string) ($_POST['topic'] ?? 'Chưa phân loại'));
             $difficulty = in_array($_POST['difficulty'] ?? '', ['easy','medium','hard'], true) ? $_POST['difficulty'] : 'medium';
             $questionOwner = $isAdmin ? max(1, (int) ($_POST['teacher_id'] ?? $actorId)) : $actorId;
@@ -94,8 +95,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $question[$field] = trim((string) ($_POST[$field] ?? ''));
             }
             if (in_array('', $question, true)) throw new RuntimeException('Vui lòng nhập đầy đủ câu hỏi và bốn đáp án.');
-            $correct = strtoupper(trim((string) ($_POST['correct_option'] ?? '')));
-            if (!in_array($correct, ['A','B','C','D'], true)) throw new RuntimeException('Đáp án đúng không hợp lệ.');
+            $correct = quizNormalizeAnswerOptions($_POST['correct_option'] ?? '');
+            if ($correct === '') throw new RuntimeException('Hãy chọn ít nhất một đáp án đúng.');
             $difficulty = in_array($_POST['difficulty'] ?? '', ['easy','medium','hard'], true) ? $_POST['difficulty'] : 'medium';
             $topicId = (int) ($_POST['topic_id'] ?? 0);
             $topicStmt = $pdo->prepare('SELECT id FROM question_topics WHERE id=? AND teacher_id=?');
@@ -171,14 +172,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $hasHeader=$format!=='auto';
                 foreach($rows as $index=>$row){ if($index===0&&$hasHeader)continue; unset($row['__images']);$values=array_map(fn($v)=>trim((string)$v),array_values($row));
                     $rowFormat=$format;
-                    if($rowFormat==='auto'){$rowFormat=in_array(strtoupper($values[7]??''),['A','B','C','D'],true)?'eight':(in_array(strtoupper($values[6]??''),['A','B','C','D'],true)?'seven':'six');}
+                    if($rowFormat==='auto'){$rowFormat=quizNormalizeAnswerOptions($values[7]??'')!==''?'eight':(quizNormalizeAnswerOptions($values[6]??'')!==''?'seven':'six');}
                     if($rowFormat==='eight'){[$difficulty,$text,$a,$b,$c,$d,$correct]=array_slice($values,1,7);}
                     elseif($rowFormat==='seven'){[$difficulty,$text,$a,$b,$c,$d,$correct]=array_slice($values,0,7);}
                     else{$difficulty='medium';[$text,$a,$b,$c,$d,$correct]=array_slice($values,0,6);}
                     $difficultyMap=['dễ'=>'easy','de'=>'easy','easy'=>'easy','khó'=>'hard','kho'=>'hard','hard'=>'hard'];
-                    $difficulty=$difficultyMap[mb_strtolower($difficulty,'UTF-8')]??'medium'; $correct=strtoupper($correct);
+                    $difficulty=$difficultyMap[mb_strtolower($difficulty,'UTF-8')]??'medium'; $correct=quizNormalizeAnswerOptions($correct);
                     if($importDifficulty!=='from_file')$difficulty=$importDifficulty;
-                    if($text===''||!in_array($correct,['A','B','C','D'],true))continue;
+                    if($text===''||$correct==='')continue;
                     $question=['question_text'=>$text,'option_a'=>$a,'option_b'=>$b,'option_c'=>$c,'option_d'=>$d]; $fingerprint=questionFingerprint($question);
                     if(isset($seenImportFingerprints[$fingerprint])){$duplicates++;continue;}
                     $seenImportFingerprints[$fingerprint]=true;
@@ -277,6 +278,39 @@ $page_title='Ngân hàng câu hỏi';require_once '../includes/header.php';
 <main class="bank-panel"><form method="get" class="bank-actions" style="margin-bottom:18px"><input name="q" value="<?php echo htmlspecialchars($search);?>" placeholder="Tìm nội dung câu hỏi" style="flex:1;min-width:220px"><select name="topic_id"><option value="0">Mọi chủ đề</option><?php foreach($topics as $topic):?><option value="<?php echo $topic['id'];?>" <?php echo $topicFilter==$topic['id']?'selected':'';?>><?php echo htmlspecialchars($topic['name']);?></option><?php endforeach;?></select><select name="difficulty"><option value="">Mọi mức độ</option><option value="easy" <?php echo $difficultyFilter==='easy'?'selected':'';?>>Dễ</option><option value="medium" <?php echo $difficultyFilter==='medium'?'selected':'';?>>Trung bình</option><option value="hard" <?php echo $difficultyFilter==='hard'?'selected':'';?>>Khó</option></select><button class="btn btn-outline">Lọc</button></form><h2><?php echo number_format($totalQuestions);?> câu hỏi <small style="font-size:14px;color:var(--text-muted);font-weight:500">· Trang <?php echo $currentPage;?>/<?php echo $totalPages;?></small></h2><?php foreach($questions as $q):?><article class="question-card" id="question-<?php echo (int)$q['id'];?>"><div class="question-meta"><span><?php echo htmlspecialchars($q['topic_name']??'Chưa phân loại');?></span><span><?php echo questionDifficultyLabel($q['difficulty']);?></span><span>Đã dùng <?php echo (int)$q['usage_count'];?> lần</span><?php if($isAdmin):?><span><?php echo htmlspecialchars($q['teacher_name']??'');?></span><?php endif;?></div><strong><?php echo nl2br(htmlspecialchars($q['question_text']));?></strong><ol type="A" style="color:var(--text-muted)"><li><?php echo htmlspecialchars($q['option_a']);?></li><li><?php echo htmlspecialchars($q['option_b']);?></li><li><?php echo htmlspecialchars($q['option_c']);?></li><li><?php echo htmlspecialchars($q['option_d']);?></li></ol><div class="bank-actions"><span style="color:var(--success)">Đúng: <?php echo $q['correct_option'];?></span><form method="post" onsubmit="return confirm('Xóa câu hỏi này?')" style="margin-left:auto"><?php echo csrfField();?><input type="hidden" name="action" value="delete_question"><input type="hidden" name="question_id" value="<?php echo $q['id'];?>"><button class="btn btn-outline" style="color:var(--danger)"><i class='bx bx-trash'></i> Xóa</button></form></div><details class="question-edit"><summary><i class='bx bx-edit'></i> Sửa câu hỏi</summary><form method="post" class="bank-form question-update-form"><?php echo csrfField();?><input type="hidden" name="action" value="update_question"><input type="hidden" name="question_id" value="<?php echo (int)$q['id'];?>"><div class="question-edit-grid"><div class="wide"><label>Chủ đề</label><select name="topic_id" required><?php foreach($topics as $topic):?><?php if((int)$topic['teacher_id']===(int)$q['teacher_id']):?><option value="<?php echo (int)$topic['id'];?>" <?php echo (int)$q['topic_id']===(int)$topic['id']?'selected':'';?>><?php echo htmlspecialchars($topic['name']);?></option><?php endif;?><?php endforeach;?></select></div><div class="wide"><label>Nội dung câu hỏi</label><textarea name="question_text" required><?php echo htmlspecialchars($q['question_text']);?></textarea></div><?php foreach(['a','b','c','d'] as $letter):?><div><label>Đáp án <?php echo strtoupper($letter);?></label><input name="option_<?php echo $letter;?>" value="<?php echo htmlspecialchars($q['option_'.$letter],ENT_QUOTES,'UTF-8');?>" required></div><?php endforeach;?><div><label>Đáp án đúng</label><select name="correct_option"><?php foreach(['A','B','C','D'] as $letter):?><option value="<?php echo $letter;?>" <?php echo $q['correct_option']===$letter?'selected':'';?>><?php echo $letter;?></option><?php endforeach;?></select></div><div><label>Mức độ</label><select name="difficulty"><option value="easy" <?php echo $q['difficulty']==='easy'?'selected':'';?>>Dễ</option><option value="medium" <?php echo $q['difficulty']==='medium'?'selected':'';?>>Trung bình</option><option value="hard" <?php echo $q['difficulty']==='hard'?'selected':'';?>>Khó</option></select></div></div><div class="question-edit-buttons"><button type="submit" class="btn btn-primary"><i class='bx bx-save'></i> Lưu thay đổi</button><span class="question-save-note">Hãy bấm “Lưu thay đổi” trước khi tải lại trang.</span></div></form></details></article><?php endforeach;?><?php if(!$questions):?><p style="color:var(--text-muted)">Chưa có câu hỏi phù hợp.</p><?php endif;?><?php if($totalPages>1):?><nav class="bank-actions" style="justify-content:center;margin-top:20px"><a class="btn btn-outline" href="<?php echo htmlspecialchars($pageUrl(max(1,$currentPage-1)));?>" <?php echo $currentPage<=1?'style="pointer-events:none;opacity:.45"':'';?>><i class='bx bx-chevron-left'></i> Trước</a><?php for($page=max(1,$currentPage-2);$page<=min($totalPages,$currentPage+2);$page++):?><a class="btn <?php echo $page===$currentPage?'btn-primary':'btn-outline';?>" href="<?php echo htmlspecialchars($pageUrl($page));?>"><?php echo $page;?></a><?php endfor;?><a class="btn btn-outline" href="<?php echo htmlspecialchars($pageUrl(min($totalPages,$currentPage+1)));?>" <?php echo $currentPage>=$totalPages?'style="pointer-events:none;opacity:.45"':'';?>>Sau <i class='bx bx-chevron-right'></i></a></nav><?php endif;?></main></div>
 <script>
 (() => {
+    document.querySelectorAll('select[name="correct_option"]').forEach(select => {
+        const card = select.closest('.question-card');
+        const answerLabel = card?.querySelector('.bank-actions > span');
+        const current = answerLabel
+            ? answerLabel.textContent.replace(/^\s*Đúng:\s*/i, '').trim()
+            : select.value;
+        const selected = new Set(current.split(',').map(value => value.trim()).filter(Boolean));
+        const group = document.createElement('div');
+        group.style.cssText = 'display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0';
+        group.innerHTML = '<strong>Đáp án đúng:</strong>';
+        ['A','B','C','D'].forEach(letter => {
+            const label = document.createElement('label');
+            label.style.cssText = 'display:inline-flex;align-items:center;gap:6px;cursor:pointer';
+            const input = document.createElement('input');
+            input.type = 'checkbox';
+            input.name = 'correct_option[]';
+            input.value = letter;
+            input.checked = selected.has(letter);
+            input.style.width = '18px';
+            input.style.height = '18px';
+            label.append(input, document.createTextNode(letter));
+            group.appendChild(label);
+        });
+        select.replaceWith(group);
+    });
+    const importFileInput = document.querySelector('input[name="question_files[]"]');
+    if (importFileInput) {
+        const note = document.createElement('small');
+        note.style.color = 'var(--primary)';
+        note.innerHTML = 'Câu có nhiều đáp án đúng: ghi <strong>A,D</strong> trong cột Đáp án đúng.';
+        importFileInput.insertAdjacentElement('afterend', note);
+    }
+
     const questionErrors = <?php echo json_encode($questionErrors,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
     Object.entries(questionErrors).forEach(([questionId, message]) => {
         const card = document.getElementById(`question-${questionId}`);
