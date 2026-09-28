@@ -5,11 +5,10 @@ declare(strict_types=1);
 function recordLoginHistory(PDO $pdo, ?int $userId, string $action, string $method, ?string $email = null, array $extra = []): void
 {
     try {
-        $context = array_filter([
+        $context = array_filter(array_merge([
             'email' => $email !== '' ? mb_substr((string) $email, 0, 255) : null,
             'method' => $method,
-            ...$extra,
-        ], static fn($value): bool => $value !== null && $value !== '');
+        ], $extra), static fn($value): bool => $value !== null && $value !== '');
         $statement = $pdo->prepare(
             'INSERT INTO audit_logs (user_id, action, entity_type, context_json, ip_address, user_agent)
              VALUES (?, ?, ?, ?, ?, ?)'

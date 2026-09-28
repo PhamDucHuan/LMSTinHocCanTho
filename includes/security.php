@@ -65,6 +65,17 @@ function verifyCsrfToken(?string $token = null): void
     $token ??= $_POST['csrf_token'] ?? ($_SERVER['HTTP_X_CSRF_TOKEN'] ?? null);
     if (!is_string($token) || !hash_equals($_SESSION['csrf_token'] ?? '', $token)) {
         http_response_code(419);
+        $isAjax = strtolower((string) ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '')) === 'xmlhttprequest'
+            || str_contains(strtolower((string) ($_SERVER['HTTP_ACCEPT'] ?? '')), 'application/json');
+        if ($isAjax) {
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode([
+                'ok' => false,
+                'status' => 'csrf_expired',
+                'message' => 'Phiên đăng ký đã hết hạn. Vui lòng tải lại trang rồi thử lại.',
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
         exit('Yêu cầu đã hết hạn hoặc không hợp lệ. Vui lòng tải lại trang.');
     }
 }

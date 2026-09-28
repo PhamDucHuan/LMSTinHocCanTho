@@ -37,24 +37,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($password === '') $registrationError('Vui lòng nhập mật khẩu.', 'password');
         if (strlen($password) < 8) $registrationError('Mật khẩu phải có ít nhất 8 ký tự.', 'password');
 
-        // Check if email exists
-        $stmt = $pdo->prepare("SELECT id FROM users WHERE email = ?");
-        $stmt->execute([$email]);
-        if ($stmt->fetch()) {
-            $registrationError('Email này đã được sử dụng.', 'email', 409);
-        }
-
-        $hashed_password = password_hash($password, PASSWORD_DEFAULT);
-
         try {
+            // Kiểm tra và tạo trong cùng một khối lỗi để lỗi CSDL ở bất kỳ
+            // bước nào cũng trả về JSON mà giao diện đăng ký có thể hiển thị.
+            $stmt = $pdo->prepare("SELECT id FROM users WHERE email = ? LIMIT 1");
+            $stmt->execute([$email]);
+            if ($stmt->fetch()) {
+                $registrationError('Email này đã được sử dụng.', 'email', 409);
+            }
+
+            $hashed_password = password_hash($password, PASSWORD_DEFAULT);
             $stmt = $pdo->prepare("INSERT INTO users (name, email, password_hash, role, is_approved) VALUES (?, ?, ?, ?, 0)");
             $registered = $stmt->execute([$name, $email, $hashed_password, $role]);
         } catch (PDOException $error) {
+            $isDuplicate = (string) $error->getCode() === '23000';
+            $isTemporaryConnectionError = function_exists('isRetryableDatabaseConnectionError')
+                && isRetryableDatabaseConnectionError($error);
             error_log('Registration failed: ' . $error->getMessage());
             $registrationError(
-                $error->getCode() === '23000' ? 'Email này đã được sử dụng.' : 'Đăng ký thất bại. Vui lòng thử lại sau.',
-                $error->getCode() === '23000' ? 'email' : null,
-                $error->getCode() === '23000' ? 409 : 500
+                $isDuplicate
+                    ? 'Email này đã được sử dụng.'
+                    : ($isTemporaryConnectionError
+                        ? 'Máy chủ dữ liệu đang tạm thời bận. Chưa có tài khoản nào được tạo. Vui lòng thử lại sau vài giây.'
+                        : 'Hệ thống chưa thể tạo tài khoản. Vui lòng thử lại; nếu lỗi vẫn tiếp diễn, hãy liên hệ quản trị viên.'),
+                $isDuplicate ? 'email' : null,
+                $isDuplicate ? 409 : ($isTemporaryConnectionError ? 503 : 500)
             );
         }
 

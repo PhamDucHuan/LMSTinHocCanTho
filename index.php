@@ -101,7 +101,7 @@ if (!empty($_SESSION['user_id'])) {
                 </form>
 
                 <!-- Register Form -->
-                <form id="register-form" action="includes/auth.php" method="POST" class="auth-form" novalidate>
+                <form id="register-form" action="includes/register.php" method="POST" class="auth-form" novalidate>
                 <?php echo csrfField(); ?>
                 <input type="hidden" name="action" value="register">
 
@@ -150,6 +150,6 @@ if (!empty($_SESSION['user_id'])) {
         </div>
     </div>
 
-    <script src="assets/js/main.js"></script>
+    <script src="assets/js/main.js?v=20260919-register"></script>
 </body>
 </html>

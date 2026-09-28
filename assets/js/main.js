@@ -115,7 +115,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 try { result = JSON.parse(responseText); } catch (error) { /* Phản hồi lỗi cũ dạng văn bản. */ }
                 if (!response.ok || !result?.ok) {
                     const plainResponse = responseText.trim().startsWith('<') ? '' : responseText.trim();
-                    throw Object.assign(new Error(result?.message || plainResponse || 'Không thể đăng ký lúc này. Vui lòng thử lại.'), {field: result?.field || null});
+                    const waitingMessage = result?.status === 'waiting'
+                        ? `Máy chủ dữ liệu đang tạm thời bận. Chưa có tài khoản nào được tạo. Vui lòng đợi ${result.retry_after || 5} giây rồi thử lại.`
+                        : null;
+                    const invalidResponseMessage = !result && !plainResponse
+                        ? 'Máy chủ không trả về phản hồi hợp lệ. Chưa xác nhận được việc tạo tài khoản; vui lòng tải lại trang rồi thử lại.'
+                        : null;
+                    throw Object.assign(new Error(result?.message || waitingMessage || plainResponse || invalidResponseMessage || 'Không thể đăng ký lúc này. Vui lòng thử lại.'), {field: result?.field || null});
                 }
                 window.location.assign(result.redirect || 'pending_approval.php');
             } catch (error) {

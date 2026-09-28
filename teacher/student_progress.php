@@ -406,6 +406,7 @@ require_once '../includes/header.php';
     .progress-filter select,.progress-filter .btn{height:40px;min-height:40px;box-sizing:border-box}
     .progress-filter .btn{align-self:end;justify-content:center;padding:0 20px;white-space:nowrap;transform:none}
     .progress-filter .is-disabled{opacity:.45;pointer-events:none;cursor:default}
+    .progress-export.is-disabled{opacity:.45;pointer-events:none;cursor:default}
     .course-progress{margin-bottom:22px}
     .course-progress-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px}
     .course-progress-heading h2{margin:0}
@@ -439,6 +440,9 @@ require_once '../includes/header.php';
                 <i class='bx bx-mail-send'></i> Gửi nhắc nhở hàng loạt (<?php echo count($upcomingExamsList); ?>)
             </button>
             <?php endif; ?>
+            <a class="btn btn-outline progress-export <?php echo $classFilter && $selectedClassName !== '' ? '' : 'is-disabled'; ?>" href="export_student_progress.php?class_id=<?php echo (int) $classFilter; ?>" aria-disabled="<?php echo $classFilter && $selectedClassName !== '' ? 'false' : 'true'; ?>" title="<?php echo $classFilter && $selectedClassName !== '' ? 'Xuất kết quả của lớp đang chọn' : 'Hãy chọn một lớp để xuất Excel'; ?>" style="height:40px">
+                <i class='bx bx-spreadsheet'></i> Xuất Excel lớp
+            </a>
             <form method="GET" class="progress-filter">
                 <label>
                     Khóa học

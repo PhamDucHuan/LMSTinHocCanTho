@@ -80,7 +80,15 @@ function respondDatabaseUnavailable(): never
     $isAjax = strtolower((string) ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '')) === 'xmlhttprequest';
     if ($isProbe || $acceptsJson || $isAjax) {
         header('Content-Type: application/json; charset=utf-8');
-        echo json_encode(['ok' => false, 'status' => 'waiting', 'retry_after' => 5], JSON_UNESCAPED_UNICODE);
+        echo json_encode([
+            'ok' => false,
+            'status' => 'waiting',
+            'retry_after' => 5,
+            // Phản hồi này được dùng cả ở form đăng ký. Nói rõ rằng thao tác
+            // chưa được thực hiện để người dùng không phải đoán tài khoản đã
+            // được tạo hay chưa khi CSDL tạm thời bận.
+            'message' => 'Máy chủ dữ liệu đang tạm thời bận. Chưa có tài khoản nào được tạo. Vui lòng đợi 5 giây rồi thử lại.',
+        ], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
