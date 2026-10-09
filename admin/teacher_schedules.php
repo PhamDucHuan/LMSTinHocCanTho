@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once '../includes/security.php';
 secureSessionStart();
 require_once '../config/database.php';
+require_once '../includes/schedule_time.php';
 
 global $pdo;
 $viewerRole = (string) ($_SESSION['user_role'] ?? '');
@@ -62,12 +63,26 @@ $totalSessions = 0;
 if ($teacherId > 0) {
     $classStmt = $pdo->prepare(
         "SELECT tc.id, tc.class_name, tc.notes, tc.status, tc.time_shift, tc.total_sessions, c.title AS course_title,
+                COALESCE(range_schedule.first_start_time, tc.planned_start_time,
+                    CASE tc.time_shift WHEN 'afternoon' THEN '12:00:00' WHEN 'evening' THEN '17:30:00' ELSE '00:00:00' END) AS display_start_time,
+                COALESCE(range_schedule.first_end_time, tc.planned_end_time, '23:59:59') AS display_end_time,
+                CASE
+                    WHEN COALESCE(range_schedule.first_start_time, tc.planned_start_time, CASE tc.time_shift WHEN 'afternoon' THEN '12:00:00' WHEN 'evening' THEN '17:30:00' ELSE '00:00:00' END) >= '17:30:00' THEN 'evening'
+                    WHEN COALESCE(range_schedule.first_start_time, tc.planned_start_time, CASE tc.time_shift WHEN 'afternoon' THEN '12:00:00' WHEN 'evening' THEN '17:30:00' ELSE '00:00:00' END) >= '12:00:00' THEN 'afternoon'
+                    ELSE 'morning'
+                END AS display_time_shift,
                 GROUP_CONCAT(DISTINCT tcs.student_name ORDER BY tcs.student_name SEPARATOR ', ') AS students,
                 COUNT(DISTINCT tcs.id) AS student_count,
                 COALESCE(progress.learned_sessions, 0) AS learned_sessions,
                 COALESCE(progress.scheduled_sessions, 0) AS scheduled_sessions
          FROM teaching_classes tc
          LEFT JOIN courses c ON c.id=tc.course_id
+         LEFT JOIN (
+             SELECT teaching_class_id, MIN(start_time) AS first_start_time, MIN(end_time) AS first_end_time
+             FROM teaching_schedule_slots
+             WHERE teaching_date BETWEEN ? AND ?
+             GROUP BY teaching_class_id
+         ) range_schedule ON range_schedule.teaching_class_id=tc.id
          LEFT JOIN (
              SELECT teaching_class_id,
                     SUM(CASE WHEN makeup_student_id IS NULL AND attendance_status='present' THEN 1 ELSE 0 END) AS learned_sessions,
@@ -80,10 +95,10 @@ if ($teacherId > 0) {
              SELECT 1 FROM teaching_schedule_slots substitute_slot
              WHERE substitute_slot.teaching_class_id=tc.id AND substitute_slot.substitute_teacher_id=?
          ))
-         GROUP BY tc.id, tc.class_name, tc.notes, tc.status, tc.time_shift, tc.total_sessions, c.title, tc.sort_order, progress.learned_sessions, progress.scheduled_sessions
-         ORDER BY FIELD(tc.time_shift, 'morning', 'afternoon', 'evening'), tc.sort_order, tc.id"
+         GROUP BY tc.id, tc.class_name, tc.notes, tc.status, tc.time_shift, tc.total_sessions, tc.planned_start_time, tc.planned_end_time, c.title, tc.sort_order, range_schedule.first_start_time, range_schedule.first_end_time, progress.learned_sessions, progress.scheduled_sessions
+         ORDER BY FIELD(display_time_shift, 'morning', 'afternoon', 'evening'), display_start_time, display_end_time, tc.sort_order, tc.id"
     );
-    $classStmt->execute([$teacherId, $teacherId]);
+    $classStmt->execute([$weekStart->format('Y-m-d'), $weekEnd->format('Y-m-d'), $teacherId, $teacherId]);
     $classes = $classStmt->fetchAll(PDO::FETCH_ASSOC);
 
     $slotStmt = $pdo->prepare(
@@ -92,7 +107,7 @@ if ($teacherId > 0) {
          JOIN teaching_classes tc ON tc.id=ts.teaching_class_id
          LEFT JOIN users replacement ON replacement.id=ts.substitute_teacher_id
          WHERE tc.status=\'active\' AND (tc.teacher_id=? OR ts.substitute_teacher_id=?) AND ts.teaching_date BETWEEN ? AND ?
-         ORDER BY ts.start_time, ts.id'
+         ORDER BY ts.teaching_date, ts.start_time, ts.end_time, ts.teaching_class_id, ts.id'
     );
     $slotStmt->execute([$teacherId, $teacherId, $weekStart->format('Y-m-d'), $weekEnd->format('Y-m-d')]);
     foreach ($slotStmt as $slot) {
@@ -157,7 +172,7 @@ require_once '../includes/header.php';
 <?php
 $teacherShiftGroups = ['morning' => [], 'afternoon' => [], 'evening' => []];
 foreach ($classes as $class) {
-    $shift = $class['time_shift'] ?? 'morning';
+    $shift = $class['display_time_shift'] ?? $class['time_shift'] ?? 'morning';
     if (!isset($teacherShiftGroups[$shift])) $shift = 'morning';
     $teacherShiftGroups[$shift][] = $class;
 }
@@ -170,7 +185,7 @@ $teacherShiftColors = ['morning' => '#2563eb', 'afternoon' => '#ea580c', 'evenin
                 <?php if (empty($shiftClasses)): ?><tr class="shift-zone shift-<?php echo $shiftKey; ?>"><td colspan="<?php echo count($days)+1; ?>" class="shift-empty">Chưa có lớp nào trong ca này</td></tr><?php endif; ?>
                 <?php foreach ($shiftClasses as $class): $className=(string)($class['course_title'] ?: $class['class_name']); $learnedSessions=(int)$class['learned_sessions']; $totalClassSessions=(int)$class['total_sessions']>0?(int)$class['total_sessions']:(int)$class['scheduled_sessions']; ?>
                 <tr class="shift-zone shift-<?php echo $shiftKey; ?>"><td class="class-info"><strong><?php echo htmlspecialchars($className); ?></strong><small><?php echo (int)$class['student_count']; ?> học viên</small><small class="teacher-class-progress <?php echo $totalClassSessions > 0 && $learnedSessions >= $totalClassSessions ? 'is-complete' : ''; ?>"><i class='bx bx-check-circle'></i> <?php echo $learnedSessions; ?>/<?php echo $totalClassSessions; ?> buổi</small><small><?php echo htmlspecialchars($class['students'] ?: 'Chưa nhập học viên'); ?></small><?php if (!empty($class['notes'])): ?><small class="class-note" title="<?php echo htmlspecialchars($class['notes'], ENT_QUOTES); ?>"><?php echo htmlspecialchars($class['notes']); ?></small><?php endif; ?></td>
-                <?php foreach ($days as $day): $date=$day->format('Y-m-d'); $weekend=(int)$day->format('N')>=6; $isToday=$date===$today; ?><td class="<?php echo trim(($weekend ? 'weekend ' : '') . ($isToday ? 'today' : '')); ?>"><?php foreach ($slots[(int)$class['id']][$date] ?? [] as $slot): ?><span class="schedule-slot"><?php echo substr((string)$slot['start_time'],0,5); ?> – <?php echo substr((string)$slot['end_time'],0,5); ?></span><?php endforeach; ?></td><?php endforeach; ?></tr>
+                <?php foreach ($days as $day): $date=$day->format('Y-m-d'); $weekend=(int)$day->format('N')>=6; $isToday=$date===$today; ?><td class="<?php echo trim(($weekend ? 'weekend ' : '') . ($isToday ? 'today' : '')); ?>"><?php foreach ($slots[(int)$class['id']][$date] ?? [] as $slot): ?><span class="schedule-slot"><?php echo scheduleTimeRange24($slot['start_time'], $slot['end_time']); ?></span><?php endforeach; ?></td><?php endforeach; ?></tr>
             <?php endforeach; ?>
             <?php endforeach; ?>
             <?php if (!$classes): ?><tr><td class="empty-view" colspan="<?php echo count($days)+1; ?>">Giáo viên này chưa có lớp đang hoạt động.</td></tr><?php endif; ?>

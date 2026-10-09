@@ -130,7 +130,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 $courseSelect = "SELECT c.*, owner.name AS owner_name,
     COALESCE((SELECT GROUP_CONCAT(u.name ORDER BY u.name SEPARATOR ', ') FROM course_teachers ct JOIN users u ON u.id=ct.teacher_id WHERE ct.course_id=c.id), owner.name) AS teacher_names,
     COALESCE((SELECT GROUP_CONCAT(ct.teacher_id ORDER BY ct.teacher_id) FROM course_teachers ct WHERE ct.course_id=c.id), c.teacher_id) AS teacher_ids,
-    (SELECT COUNT(DISTINCT lcs.student_id) FROM learning_classes lc JOIN learning_class_students lcs ON lcs.learning_class_id=lc.id WHERE lc.course_id=c.id AND lc.status='active') AS student_count
+    (SELECT COUNT(DISTINCT lcs.student_id) FROM learning_classes lc JOIN learning_class_students lcs ON lcs.learning_class_id=lc.id WHERE lc.course_id=c.id AND lc.status='active') AS student_count,
+    (SELECT COUNT(*) FROM course_enrollment_requests er WHERE er.course_id=c.id AND er.status='pending') AS pending_request_count
     FROM courses c JOIN users owner ON owner.id=c.teacher_id";
 if ($_SESSION['user_role'] === 'admin') {
     $stmt = $pdo->prepare($courseSelect . ' ORDER BY c.created_at DESC');
@@ -164,6 +165,7 @@ require_once '../includes/header.php';
     .course-management-title { margin:0 0 10px; padding-right:72px; color:var(--text-main); font-size:20px; line-height:1.3; overflow-wrap:anywhere; }
     .course-management-meta { display:flex; flex-direction:column; gap:7px; margin-bottom:13px; color:var(--text-muted); font-size:13px; }
     .course-management-meta .student-count { color:#7dd3fc; }
+    .course-management-meta .pending-request-count { color:#fbbf24; font-weight:700; }
     .course-management-description {
         flex:1;
         margin:0 0 14px;
@@ -217,6 +219,7 @@ require_once '../includes/header.php';
                 <div class="course-management-meta">
                     <span><i class='bx bx-user'></i> Giảng viên: <?php echo htmlspecialchars($course['teacher_names']); ?></span>
                     <span class="student-count"><i class='bx bx-group'></i> Số học viên: <strong><?php echo (int) $course['student_count']; ?></strong></span>
+                    <?php if ((int) $course['pending_request_count'] > 0): ?><span class="pending-request-count"><i class='bx bx-time-five'></i> <?php echo (int) $course['pending_request_count']; ?> yêu cầu chờ duyệt</span><?php endif; ?>
                 </div>
                 <p class="course-management-description">
                     <?php
@@ -228,8 +231,8 @@ require_once '../includes/header.php';
                 </p>
                 
                 <div class="course-management-actions">
-                    <a href="course_detail.php?id=<?php echo $course['id']; ?>" class="btn btn-primary">
-                        <i class='bx bx-cog'></i> Quản lý khóa học
+                    <a href="course_detail.php?id=<?php echo $course['id']; ?><?php echo (int) $course['pending_request_count'] > 0 ? '#enrollment-requests' : ''; ?>" class="btn btn-primary">
+                        <i class='bx <?php echo (int) $course['pending_request_count'] > 0 ? 'bx-user-check' : 'bx-cog'; ?>'></i> <?php echo (int) $course['pending_request_count'] > 0 ? 'Duyệt yêu cầu' : 'Quản lý khóa học'; ?>
                     </a>
                 </div>
             </div>

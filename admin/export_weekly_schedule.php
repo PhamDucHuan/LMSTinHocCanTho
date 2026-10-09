@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once '../includes/security.php';
 secureSessionStart();
 require_once '../config/database.php';
+require_once '../includes/schedule_time.php';
 
 global $pdo;
 
@@ -83,8 +84,7 @@ $sql .=
     " GROUP BY ts.id, ts.teaching_date, ts.start_time, ts.end_time,
                tc.id, tc.class_name, tc.time_shift, tc.sort_order, c.title,
                owner.name, replacement.name
-      ORDER BY ts.teaching_date, ts.start_time,
-               FIELD(tc.time_shift, 'morning', 'afternoon', 'evening'),
+      ORDER BY ts.teaching_date, ts.start_time, ts.end_time,
                tc.sort_order, tc.id, ts.id";
 
 $stmt = $pdo->prepare($sql);
@@ -93,6 +93,14 @@ $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 $classSql =
     "SELECT tc.id, tc.class_name, tc.time_shift, tc.sort_order,
+            COALESCE(range_schedule.first_start_time, tc.planned_start_time,
+                CASE tc.time_shift WHEN 'afternoon' THEN '12:00:00' WHEN 'evening' THEN '17:30:00' ELSE '00:00:00' END) AS display_start_time,
+            COALESCE(range_schedule.first_end_time, tc.planned_end_time, '23:59:59') AS display_end_time,
+            CASE
+                WHEN COALESCE(range_schedule.first_start_time, tc.planned_start_time, CASE tc.time_shift WHEN 'afternoon' THEN '12:00:00' WHEN 'evening' THEN '17:30:00' ELSE '00:00:00' END) >= '17:30:00' THEN 'evening'
+                WHEN COALESCE(range_schedule.first_start_time, tc.planned_start_time, CASE tc.time_shift WHEN 'afternoon' THEN '12:00:00' WHEN 'evening' THEN '17:30:00' ELSE '00:00:00' END) >= '12:00:00' THEN 'afternoon'
+                ELSE 'morning'
+            END AS display_time_shift,
             COALESCE(c.title, tc.class_name) AS display_name,
             owner.name AS teacher_name,
             COUNT(DISTINCT tcs.id) AS student_count,
@@ -100,11 +108,21 @@ $classSql =
      FROM teaching_classes tc
      LEFT JOIN courses c ON c.id=tc.course_id
      LEFT JOIN users owner ON owner.id=tc.teacher_id
+     LEFT JOIN (
+         SELECT teaching_class_id, MIN(start_time) AS first_start_time, MIN(end_time) AS first_end_time
+         FROM teaching_schedule_slots
+         WHERE teaching_date BETWEEN ? AND ?
+         GROUP BY teaching_class_id
+     ) range_schedule ON range_schedule.teaching_class_id=tc.id
      LEFT JOIN teaching_class_students tcs ON tcs.teaching_class_id=tc.id
      WHERE " . ($isMonthExport
         ? 'EXISTS (SELECT 1 FROM teaching_schedule_slots range_slot WHERE range_slot.teaching_class_id=tc.id AND range_slot.teaching_date BETWEEN ? AND ?)'
         : "tc.status='active'");
-$classParams = $isMonthExport ? [$rangeStart->format('Y-m-d'), $rangeEnd->format('Y-m-d')] : [];
+$classParams = [$rangeStart->format('Y-m-d'), $rangeEnd->format('Y-m-d')];
+if ($isMonthExport) {
+    $classParams[] = $rangeStart->format('Y-m-d');
+    $classParams[] = $rangeEnd->format('Y-m-d');
+}
 if ($teacherId !== null) {
     $classSql .= ' AND (tc.teacher_id=? OR EXISTS (
         SELECT 1 FROM teaching_schedule_slots substitute_slot
@@ -121,8 +139,8 @@ if ($teacherId !== null) {
     }
 }
 $classSql .=
-    " GROUP BY tc.id, tc.class_name, tc.time_shift, tc.sort_order, c.title, owner.name
-      ORDER BY FIELD(tc.time_shift, 'morning', 'afternoon', 'evening'), tc.sort_order, tc.id";
+    " GROUP BY tc.id, tc.class_name, tc.time_shift, tc.sort_order, tc.planned_start_time, tc.planned_end_time, c.title, owner.name, range_schedule.first_start_time, range_schedule.first_end_time
+      ORDER BY FIELD(display_time_shift, 'morning', 'afternoon', 'evening'), display_start_time, display_end_time, tc.sort_order, tc.id";
 $classStmt = $pdo->prepare($classSql);
 $classStmt->execute($classParams);
 $matrixClasses = $classStmt->fetchAll(PDO::FETCH_ASSOC);
@@ -148,11 +166,7 @@ foreach ($shiftLabels as $key => $label) {
     ];
 }
 foreach ($rows as &$row) {
-    $shift = (string) ($row['time_shift'] ?? '');
-    if (!isset($summaries[$shift])) {
-        $hour = (int) substr((string) $row['start_time'], 0, 2);
-        $shift = $hour < 12 ? 'morning' : ($hour < 18 ? 'afternoon' : 'evening');
-    }
+    $shift = scheduleMajorShift($row['start_time'] ?? '', (string) ($row['time_shift'] ?? 'morning'));
     $row['_shift'] = $shift;
     $summaries[$shift]['sessions']++;
     $summaries[$shift]['classes'][(int) $row['class_id']] = true;
@@ -163,11 +177,11 @@ unset($row);
 $matrixSlots = [];
 foreach ($rows as $row) {
     $matrixSlots[(int) $row['class_id']][(string) $row['teaching_date']][] =
-        substr((string) $row['start_time'], 0, 5) . ' - ' . substr((string) $row['end_time'], 0, 5);
+        scheduleTimeRange24($row['start_time'], $row['end_time'], ' - ');
 }
 $matrixShiftGroups = ['morning' => [], 'afternoon' => [], 'evening' => []];
 foreach ($matrixClasses as $class) {
-    $shift = (string) ($class['time_shift'] ?? 'morning');
+    $shift = (string) ($class['display_time_shift'] ?? $class['time_shift'] ?? 'morning');
     if (!isset($matrixShiftGroups[$shift])) {
         $shift = 'morning';
     }
@@ -228,8 +242,7 @@ if ($rows === []) {
     foreach ($rows as $index => $row) {
         $date = new DateTimeImmutable((string) $row['teaching_date']);
         $weekday = $weekdayLabels[(int) $date->format('N') - 1];
-        $time = substr((string) $row['start_time'], 0, 5)
-            . ' - ' . substr((string) $row['end_time'], 0, 5);
+        $time = scheduleTimeRange24($row['start_time'], $row['end_time'], ' - ');
 
         if ($previousDetailDate !== (string) $row['teaching_date']) {
             $previousDetailDate = (string) $row['teaching_date'];
@@ -415,8 +428,7 @@ $previousDetailDate = '';
 foreach ($rows as $index => $row):
     $date = new DateTimeImmutable((string) $row['teaching_date']);
     $weekday = $weekdayLabels[(int) $date->format('N') - 1];
-    $time = substr((string) $row['start_time'], 0, 5)
-        . ' - ' . substr((string) $row['end_time'], 0, 5);
+    $time = scheduleTimeRange24($row['start_time'], $row['end_time'], ' - ');
     if ($previousDetailDate !== (string) $row['teaching_date']):
         $previousDetailDate = (string) $row['teaching_date'];
 ?>

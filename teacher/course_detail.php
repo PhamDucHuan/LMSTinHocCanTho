@@ -4,6 +4,9 @@ require_once '../includes/authorization.php';
 secureSessionStart();
 require_once '../config/database.php';
 require_once '../includes/drive_helper.php';
+require_once '../includes/course_enrollment.php';
+require_once '../includes/notifications.php';
+require_once '../includes/audit.php';
 /** @var PDO $pdo */
 
 if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_role'], ['teacher', 'administrative_staff', 'admin'], true)) {
@@ -49,7 +52,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string) ($_POST['action'] ?? '');
     $newlyUploadedMaterialDriveId = null;
     try {
-        if ($action === 'add_course_material') {
+        if (in_array($action, ['approve_enrollment', 'reject_enrollment'], true)) {
+            $requestId = (int) ($_POST['request_id'] ?? 0);
+            $classId = $action === 'approve_enrollment' ? (int) ($_POST['learning_class_id'] ?? 0) : null;
+            $decision = $action === 'approve_enrollment' ? 'approved' : 'rejected';
+            $review = reviewCourseEnrollment(
+                $pdo,
+                $requestId,
+                (int) $course_id,
+                $decision,
+                $classId,
+                (int) $_SESSION['user_id']
+            );
+
+            try {
+                if ($decision === 'approved') {
+                    createNotification(
+                        $pdo,
+                        (int) $review['student_id'],
+                        'enrollment_approved',
+                        'Yêu cầu vào lớp đã được duyệt',
+                        'Bạn đã được xếp vào lớp “' . $review['class_name'] . '” của khóa “' . $review['course_title'] . '”.',
+                        '../student/classes.php',
+                        ['course_id' => (int) $course_id, 'class_id' => (int) $review['learning_class_id']]
+                    );
+                } else {
+                    createNotification(
+                        $pdo,
+                        (int) $review['student_id'],
+                        'enrollment_rejected',
+                        'Yêu cầu vào lớp chưa được duyệt',
+                        'Yêu cầu tham gia khóa “' . $review['course_title'] . '” đã bị từ chối.',
+                        '../student/classes.php',
+                        ['course_id' => (int) $course_id]
+                    );
+                }
+            } catch (Throwable $notificationError) {
+                error_log('Cannot notify enrollment review result: ' . $notificationError->getMessage());
+            }
+
+            writeAuditLog($pdo, 'enrollment.' . $decision, 'course_enrollment_request', $requestId, [
+                'course_id' => (int) $course_id,
+                'learning_class_id' => $review['learning_class_id'],
+                'student_id' => (int) $review['student_id'],
+            ]);
+            $_SESSION['success'] = $decision === 'approved'
+                ? ($review['already_enrolled']
+                    ? 'Yêu cầu đã được duyệt; học viên vốn đã có trong lớp “' . $review['class_name'] . '”.'
+                    : 'Đã duyệt và thêm học viên vào lớp “' . $review['class_name'] . '”.')
+                : 'Đã từ chối yêu cầu đăng ký khóa học.';
+        } elseif ($action === 'add_course_material') {
             $title = trim((string) ($_POST['material_title'] ?? ''));
             $type = (string) ($_POST['material_type'] ?? '');
             if ($title === '' || !in_array($type, ['pdf', 'video'], true)) throw new RuntimeException('Vui lòng nhập tên và chọn loại học liệu.');
@@ -139,6 +191,20 @@ $stmt = $pdo->prepare(
 );
 $stmt->execute([$course_id]);
 $courseClasses = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$activeCourseClasses = array_values(array_filter(
+    $courseClasses,
+    static fn(array $class): bool => $class['status'] === 'active'
+));
+
+$requestStmt = $pdo->prepare(
+    "SELECT er.id, er.student_id, er.requested_at, u.name, u.email
+     FROM course_enrollment_requests er
+     JOIN users u ON u.id=er.student_id
+     WHERE er.course_id=? AND er.status='pending'
+     ORDER BY er.requested_at, er.id"
+);
+$requestStmt->execute([$course_id]);
+$pendingEnrollmentRequests = $requestStmt->fetchAll(PDO::FETCH_ASSOC);
 
 $materialStmt = $pdo->prepare('SELECT id, title, material_type, file_name, youtube_video_id, created_at FROM course_materials WHERE course_id=? ORDER BY sort_order, id');
 $materialStmt->execute([$course_id]);
@@ -206,6 +272,7 @@ require_once '../includes/header.php';
     .course-material-form{display:grid;gap:13px}.course-material-form label{display:grid;gap:7px;color:var(--text-main);font-size:13px;font-weight:700}.course-material-form input,.course-material-form select{width:100%;box-sizing:border-box;min-height:43px;padding:10px 12px;border:1px solid rgba(148,163,184,.26);border-radius:10px;background:rgba(2,15,28,.58);color:var(--text-main);font:inherit}.course-material-form input[type=file]{padding:8px}.course-material-form .btn{margin-top:3px;justify-content:center}
     .course-material-library{padding:24px}.course-material-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(245px,1fr));gap:13px}.course-material-item{display:flex;flex-direction:column;gap:13px;min-width:0;padding:16px;border:1px solid rgba(148,163,184,.18);border-radius:14px;background:rgba(2,15,28,.28)}.course-material-item-top{display:flex;align-items:flex-start;gap:11px;min-width:0}.course-material-icon{display:grid;place-items:center;flex:0 0 42px;width:42px;height:42px;border-radius:12px;font-size:22px}.course-material-icon.pdf{color:#ff9b9b;background:rgba(248,113,113,.14)}.course-material-icon.video{color:#ff8799;background:rgba(255,0,51,.13)}.course-material-item h4{margin:0;font-size:16px;overflow-wrap:anywhere}.course-material-item small{display:block;margin-top:4px;color:var(--text-muted);overflow-wrap:anywhere}.material-kind{display:inline-flex;margin-top:8px;padding:4px 8px;border-radius:999px;background:rgba(148,163,184,.13);color:var(--text-muted);font-size:11px;font-weight:700}.course-material-footer{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:auto;color:var(--text-muted);font-size:12px}.material-actions{display:flex;gap:7px;flex-wrap:wrap}.material-actions .btn{padding:7px 10px;min-height:0}.material-actions .material-delete{color:#ff6683;border-color:rgba(255,102,131,.75)}.material-empty{display:grid;place-items:center;min-height:178px;padding:24px;text-align:center;color:var(--text-muted);border:1px dashed rgba(148,163,184,.25);border-radius:14px}
     .material-edit-dialog{width:min(500px,calc(100% - 28px));padding:0;border:1px solid rgba(148,163,184,.28);border-radius:18px;background:#0c2038;color:var(--text-main);box-shadow:0 30px 80px rgba(0,0,0,.5)}.material-edit-dialog::backdrop{background:rgba(2,8,23,.72)}.material-edit-form{display:grid;gap:15px;padding:24px}.material-edit-form h3{margin:0}.material-edit-form p{margin:0;color:var(--text-muted);font-size:13px;line-height:1.5}.material-edit-form label{display:grid;gap:7px;font-size:13px;font-weight:700}.material-edit-form input{min-height:43px;padding:10px 12px;border:1px solid rgba(148,163,184,.28);border-radius:10px;background:rgba(2,15,28,.65);color:var(--text-main);font:inherit}.material-edit-actions{display:flex;justify-content:flex-end;gap:9px;flex-wrap:wrap;margin-top:3px}
+    .enrollment-review-panel{margin-bottom:22px;padding:0;overflow:hidden;border:1px solid rgba(245,158,11,.26);border-radius:18px;background:rgba(30,41,59,.54)}.enrollment-review-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:18px 21px;border-bottom:1px solid var(--border-color)}.enrollment-review-head h3{margin:0}.pending-count{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;color:#fbbf24;background:rgba(245,158,11,.14);font-size:13px;font-weight:700}.enrollment-review-table{overflow-x:auto}.enrollment-review-table table{margin:0}.enrollment-review-actions{display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap}.enrollment-approve-form{display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap;margin:0}.enrollment-approve-form label{display:grid;gap:5px;color:var(--text-muted);font-size:12px}.enrollment-approve-form select{min-width:190px;padding:8px 10px;border:1px solid var(--border-color);border-radius:9px;background:var(--input-bg);color:var(--text-main)}.enrollment-review-actions form{margin:0}.enrollment-no-class{padding:12px 20px;color:#fbbf24;font-size:13px}
     @media(max-width:850px){.course-materials-workspace{grid-template-columns:1fr}.course-material-form-card{border-right:0;border-bottom:1px solid rgba(255,255,255,.09)}.course-material-form{grid-template-columns:1fr 1fr}.course-material-form .btn{grid-column:1 / -1}}
     @media(max-width:560px){.course-detail-hero{padding:22px}.course-materials-head,.course-material-form-card,.course-material-library{padding:18px}.course-material-form{grid-template-columns:1fr}.course-material-footer{align-items:flex-start;flex-direction:column}}
 </style>
@@ -234,6 +301,52 @@ require_once '../includes/header.php';
             <button type="button" aria-label="Đóng thông báo" data-close-material-notice>&times;</button>
         </div>
     <?php endif; ?>
+
+    <section class="enrollment-review-panel" id="enrollment-requests">
+        <header class="enrollment-review-head">
+            <div><h3><i class='bx bx-user-check'></i> Yêu cầu đăng ký vào lớp</h3><small style="color:var(--text-muted);">Duyệt học viên vào một lớp đang hoạt động của khóa học.</small></div>
+            <span class="pending-count"><i class='bx bx-time-five'></i> <?php echo count($pendingEnrollmentRequests); ?> chờ duyệt</span>
+        </header>
+        <?php if (!$activeCourseClasses && $pendingEnrollmentRequests): ?>
+            <div class="enrollment-no-class"><i class='bx bx-error-circle'></i> Hãy tạo hoặc mở lại ít nhất một lớp trước khi duyệt học viên.</div>
+        <?php endif; ?>
+        <div class="enrollment-review-table">
+            <table class="table">
+                <thead><tr><th>Học viên</th><th>Ngày gửi</th><th>Chọn lớp và xử lý</th></tr></thead>
+                <tbody>
+                <?php foreach ($pendingEnrollmentRequests as $request): ?>
+                    <tr>
+                        <td><strong><?php echo htmlspecialchars((string) $request['name']); ?></strong><small style="display:block;color:var(--text-muted);margin-top:3px;"><?php echo htmlspecialchars((string) $request['email']); ?></small></td>
+                        <td><?php echo date('d/m/Y H:i', strtotime((string) $request['requested_at'])); ?></td>
+                        <td>
+                            <div class="enrollment-review-actions">
+                                <form method="post" class="enrollment-approve-form">
+                                    <?php echo csrfField(); ?>
+                                    <input type="hidden" name="action" value="approve_enrollment">
+                                    <input type="hidden" name="request_id" value="<?php echo (int) $request['id']; ?>">
+                                    <label>Lớp tiếp nhận
+                                        <select name="learning_class_id" required <?php echo !$activeCourseClasses ? 'disabled' : ''; ?>>
+                                            <option value="">— Chọn lớp —</option>
+                                            <?php foreach ($activeCourseClasses as $learningClass): ?><option value="<?php echo (int) $learningClass['id']; ?>"><?php echo htmlspecialchars((string) $learningClass['class_name']); ?></option><?php endforeach; ?>
+                                        </select>
+                                    </label>
+                                    <button class="btn btn-primary" type="submit" <?php echo !$activeCourseClasses ? 'disabled' : ''; ?>><i class='bx bx-check'></i> Duyệt vào lớp</button>
+                                </form>
+                                <form method="post" onsubmit="return confirm('Từ chối yêu cầu đăng ký này?');">
+                                    <?php echo csrfField(); ?>
+                                    <input type="hidden" name="action" value="reject_enrollment">
+                                    <input type="hidden" name="request_id" value="<?php echo (int) $request['id']; ?>">
+                                    <button class="btn btn-outline" type="submit" style="color:var(--danger);border-color:var(--danger);"><i class='bx bx-x'></i> Từ chối</button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+                <?php if (!$pendingEnrollmentRequests): ?><tr><td colspan="3" style="text-align:center;color:var(--text-muted);padding:24px;">Không có yêu cầu nào đang chờ.</td></tr><?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </section>
 
     <section class="course-materials-panel">
         <header class="course-materials-head">

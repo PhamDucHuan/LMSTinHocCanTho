@@ -118,14 +118,18 @@ CREATE TABLE IF NOT EXISTS course_enrollment_requests (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     course_id INT UNSIGNED NOT NULL,
     student_id INT UNSIGNED NOT NULL,
+    learning_class_id INT UNSIGNED NULL,
     status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
     requested_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     reviewed_at DATETIME NULL,
     reviewed_by INT UNSIGNED NULL,
     UNIQUE KEY uq_course_enrollment_request (course_id, student_id),
     INDEX idx_enrollment_requests_status (status),
+    INDEX idx_enrollment_requests_course_status (course_id, status, requested_at),
+    INDEX idx_enrollment_requests_class (learning_class_id),
     CONSTRAINT fk_enrollment_request_course FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE CASCADE,
     CONSTRAINT fk_enrollment_request_student FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_enrollment_request_class FOREIGN KEY (learning_class_id) REFERENCES learning_classes(id) ON DELETE SET NULL,
     CONSTRAINT fk_enrollment_request_reviewer FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 

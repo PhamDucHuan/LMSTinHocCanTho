@@ -933,7 +933,7 @@ $unreadNotifications ??= 0;
                         ['url' => '../student/dashboard.php', 'icon' => 'bx-home-alt', 'label' => 'Tổng quan Học tập', 'match' => ['student/dashboard.php']],
                     ]],
                     ['id' => 'student-classes', 'label' => 'Lớp học', 'icon' => 'bx-group', 'items' => [
-                        ['url' => '../student/classes.php', 'icon' => 'bx-chalkboard', 'label' => 'Lớp học của tôi', 'match' => ['student/classes.php']],
+                        ['url' => '../student/classes.php', 'icon' => 'bx-chalkboard', 'label' => 'Lớp học & đăng ký', 'match' => ['student/classes.php']],
                     ]],
                     ['id' => 'student-learning', 'label' => 'Học tập & làm bài', 'icon' => 'bx-book-open', 'items' => [
                         ['url' => '../student/assignments.php', 'icon' => 'bx-book-open', 'label' => 'Bài tập của tôi', 'match' => ['student/assignments.php', 'student/course.php', 'student/assignment.php', 'student/outstanding_submissions.php']],
