@@ -459,6 +459,12 @@
     </style>
     <a href="course_detail.php?id=<?php echo $courseId; ?>" style="color:var(--primary)"><i class='bx bx-arrow-back'></i> Quay lại khóa học</a>
     <h1><i class='bx bx-list-check'></i> Trắc nghiệm — <?php echo htmlspecialchars($course['title']); ?></h1>
+    <?php if($quizzes):?>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:18px">
+        <a class="btn btn-primary" href="export_quizzes.php?course_id=<?php echo (int)$courseId;?>"><i class='bx bx-download'></i> Xuất câu hỏi ra Excel</a>
+        <span class="quiz-meta">Xuất toàn bộ khóa học, mỗi bài trắc nghiệm một sheet riêng.</span>
+    </div>
+    <?php endif;?>
     <?php if(isset($_SESSION['success'])):?><div class="box" style="padding:14px;margin-bottom:14px;color:var(--success)"><?php echo htmlspecialchars($_SESSION['success']);unset($_SESSION['success']);?></div><?php endif;?>
     <?php if(isset($_SESSION['error'])):?><div class="box" style="padding:14px;margin-bottom:14px;color:var(--danger)"><?php echo htmlspecialchars($_SESSION['error']);unset($_SESSION['error']);?></div><?php endif;?>
     <section class="box quiz-category-manager">

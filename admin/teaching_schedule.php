@@ -792,6 +792,26 @@ $studentAttendanceStmt->execute([$firstDay->format('Y-m-d'), $lastDay->format('Y
 foreach ($studentAttendanceStmt as $attendance) $studentAttendanceMap[(int) $attendance['slot_id']][(int) $attendance['student_id']] = (string) $attendance['attendance_status'];
 $customShiftStmt = $pdo->query("SELECT id, name, start_time, end_time, major_shift FROM teaching_shift_presets ORDER BY FIELD(major_shift, 'morning', 'afternoon', 'evening'), start_time, end_time, name, id");
 $customShiftPresets = $customShiftStmt->fetchAll(PDO::FETCH_ASSOC);
+$scheduleTimePresets = [
+    ['id' => 'default-morning', 'name' => 'Ca sáng', 'icon' => '🌅', 'start_time' => '08:00', 'end_time' => '11:00', 'major_shift' => 'morning', 'is_default' => true],
+    ['id' => 'default-afternoon', 'name' => 'Ca chiều', 'icon' => '☀️', 'start_time' => '14:00', 'end_time' => '17:00', 'major_shift' => 'afternoon', 'is_default' => true],
+    ['id' => 'default-evening', 'name' => 'Ca tối', 'icon' => '🌙', 'start_time' => '18:00', 'end_time' => '21:00', 'major_shift' => 'evening', 'is_default' => true],
+];
+foreach ($customShiftPresets as $preset) {
+    $scheduleTimePresets[] = [
+        'id' => 'preset-' . (int) $preset['id'],
+        'name' => (string) $preset['name'],
+        'icon' => '⏰',
+        'start_time' => scheduleTime24($preset['start_time']),
+        'end_time' => scheduleTime24($preset['end_time']),
+        'major_shift' => (string) $preset['major_shift'],
+        'is_default' => false,
+    ];
+}
+usort($scheduleTimePresets, static function (array $first, array $second): int {
+    return [$first['start_time'], $first['end_time'], $first['name']]
+        <=> [$second['start_time'], $second['end_time'], $second['name']];
+});
 
 $page_title = $showOwnSchedule ? 'Lịch dạy của tôi' : 'Lịch dạy';
 require_once '../includes/header.php';
@@ -809,7 +829,7 @@ require_once '../includes/header.php';
   <section class="schedule-card"><div class="month-bar"><div><h2 style="margin:0"><i class='bx bx-table'></i> Lịch dạy tháng <?php echo $firstDay->format('m/Y'); ?></h2><p class="schedule-note" style="margin-top:6px">Giờ hiển thị theo định dạng 24 giờ. Các nhóm lịch và buổi học tự xếp theo giờ bắt đầu → giờ kết thúc.</p></div><form class="month-control" method="get"><input type="month" name="month" value="<?php echo htmlspecialchars($month); ?>"><button class="btn btn-outline">Xem lịch</button></form></div><div class="calendar-wrap"><table class="schedule-table"><thead><tr><th class="info-head">NHÓM LỊCH / HỌC VIÊN</th><?php foreach ($days as $day): $weekend=(int)$day->format('N')>=6; $isToday=$day->format('Y-m-d')===$todayDate; ?><th class="<?php echo trim(($weekend ? 'weekend ' : '') . ($isToday ? 'today' : '')); ?>"><small><?php echo ['T2','T3','T4','T5','T6','T7','CN'][(int)$day->format('N')-1]; ?></small><br><?php echo $day->format('d'); ?></th><?php endforeach; ?></tr></thead><tbody><?php foreach ($shiftGroups as $shiftKey => $shiftClasses): ?><tr class="shift-header shift-<?php echo $shiftKey; ?>"><td colspan="<?php echo count($days)+1; ?>" class="shift-label" style="--shift-color:<?php echo $shiftColors[$shiftKey]; ?>"><?php echo $shiftLabels[$shiftKey]; ?></td></tr><?php if (empty($shiftClasses)): ?><tr class="shift-zone shift-<?php echo $shiftKey; ?>"><td colspan="<?php echo count($days)+1; ?>" class="shift-empty">Chưa có lịch nào trong ca này</td></tr><?php endif; ?><?php foreach ($shiftClasses as $class): $displayName = (string) $class['class_name']; $learnedSessions = (int) $class['learned_sessions']; $totalClassSessions = (int) $class['total_sessions'] > 0 ? (int) $class['total_sessions'] : (int) $class['scheduled_sessions']; ?><tr class="shift-zone shift-<?php echo $shiftKey; ?>"><td class="info-cell"><div class="class-head"><div class="class-title"><?php echo htmlspecialchars($displayName); ?></div></div><div class="class-meta"><?php echo htmlspecialchars($class['teacher_name'] ?: 'Chưa phân công giáo viên'); ?> · <?php echo (int)$class['student_count']; ?> học viên</div><div class="class-progress <?php echo $totalClassSessions > 0 && $learnedSessions >= $totalClassSessions ? 'is-complete' : ''; ?>" data-progress-class-id="<?php echo (int)$class['id']; ?>" data-learned="<?php echo $learnedSessions; ?>" data-total="<?php echo $totalClassSessions; ?>" title="Số ca đã điểm danh Có học"><i class='bx bx-check-circle'></i><strong class="class-progress-value"><?php echo $learnedSessions; ?>/<?php echo $totalClassSessions; ?> buổi</strong></div><div class="class-meta"><?php echo htmlspecialchars($class['students'] ?: 'Chưa nhập học viên'); ?></div></td><?php foreach ($days as $day): $date=$day->format('Y-m-d'); $cellSlots=$slots[(int)$class['id']][$date]??[]; $weekend=(int)$day->format('N')>=6; ?><td class="schedule-cell <?php echo $weekend ? 'weekend' : ''; ?>" data-class-id="<?php echo (int)$class['id']; ?>" data-class-name="<?php echo htmlspecialchars($displayName, ENT_QUOTES); ?>" data-date="<?php echo $date; ?>"><?php foreach ($cellSlots as $slot): $slotStart=scheduleTime24($slot['start_time']); $slotEnd=scheduleTime24($slot['end_time']); ?><button type="button" class="slot" data-slot-id="<?php echo (int)$slot['id']; ?>" data-start="<?php echo $slotStart; ?>" data-end="<?php echo $slotEnd; ?>"><?php echo scheduleTimeRange24($slotStart, $slotEnd); ?></button><?php endforeach; ?><button type="button" class="add-slot" aria-label="Thêm ca dạy trong ô" title="Thêm ca dạy trong ô">+</button></td><?php endforeach; ?></tr><?php endforeach; ?><?php endforeach; ?><?php if (!$classes): ?><tr><td colspan="<?php echo count($days)+1; ?>" style="padding:34px;text-align:center;color:var(--text-muted)">Chưa có lịch nào. Hãy tạo nhóm lịch đầu tiên bằng nút "Tạo lịch mới".</td></tr><?php endif; ?></tbody></table></div></section>
 </div>
 <dialog class="schedule-dialog" id="class-dialog"><form method="post" id="class-form"><?php echo csrfField(); ?><input type="hidden" name="action" value="update_class"><input type="hidden" name="class_id" id="edit-class-id"><input type="hidden" name="month" value="<?php echo htmlspecialchars($month); ?>"><input type="hidden" name="scope" value="<?php echo $showOwnSchedule ? 'mine' : 'all'; ?>"><h2 class="dialog-title">Sửa nhóm lịch</h2><label>Tên hiển thị<input name="class_name" id="edit-class-name" required maxlength="191"></label><?php if ($canManageAllSchedules): ?><label>Giáo viên phụ trách<select name="teacher_id" id="edit-teacher-id"><option value="">Chưa phân công</option><?php foreach ($teachers as $teacher): ?><option value="<?php echo (int) $teacher['id']; ?>"><?php echo htmlspecialchars($teacher['name']); ?></option><?php endforeach; ?></select></label><?php endif; ?><label>Ca học<select name="time_shift" id="edit-time-shift"><option value="morning">🌅 Ca sáng (8h – 11h)</option><option value="afternoon">☀️ Ca chiều (14h – 17h)</option><option value="evening">🌙 Ca tối (18h – 21h)</option></select></label><label>Danh sách hiển thị<textarea name="student_names" id="edit-student-names"></textarea></label><div class="dialog-actions"><button class="btn btn-outline" type="button" id="close-class-dialog">Hủy</button><button class="btn btn-primary" type="submit"><i class='bx bx-save'></i> Lưu lịch</button></div></form></dialog>
-<dialog class="schedule-dialog" id="schedule-dialog"><form id="slot-form"><h2 class="dialog-title" id="slot-title">Thêm buổi dạy</h2><p class="schedule-note" id="slot-subtitle"></p><input type="hidden" id="slot-class-id"><input type="hidden" id="slot-date"><input type="hidden" id="slot-id"><label>Chọn nhanh khung giờ<select id="slot-time-preset"><option value="custom">Giờ tùy chỉnh</option><option value="08:00|09:30">08:00 – 09:30</option><option value="08:00|11:00">08:00 – 11:00</option><option value="14:00|17:00">14:00 – 17:00</option><option value="15:00|16:30">15:00 – 16:30</option><option value="18:00|21:00">18:00 – 21:00</option></select></label><div class="time-grid"><label>Giờ bắt đầu (24 giờ)<input id="slot-start" type="time" lang="vi-VN" step="60" required></label><label>Giờ kết thúc (24 giờ)<input id="slot-end" type="time" lang="vi-VN" step="60" required></label></div><p class="schedule-note">Nhập theo dạng HH:mm, ví dụ 08:00 hoặc 18:30.</p><div class="dialog-actions"><button class="btn btn-outline delete-slot" id="delete-slot" type="button" hidden><i class='bx bx-trash'></i> Xóa buổi</button><button class="btn btn-outline" type="button" id="close-dialog">Hủy</button><button class="btn btn-primary" type="submit"><i class='bx bx-save'></i> Lưu thời gian</button></div></form></dialog>
+<dialog class="schedule-dialog" id="schedule-dialog"><form id="slot-form"><h2 class="dialog-title" id="slot-title">Thêm buổi dạy</h2><p class="schedule-note" id="slot-subtitle"></p><input type="hidden" id="slot-class-id"><input type="hidden" id="slot-date"><input type="hidden" id="slot-id"><label>Chọn nhanh khung giờ<select id="slot-time-preset"><option value="custom">✏️ Giờ tùy chỉnh</option></select></label><div class="time-grid"><label>Giờ bắt đầu (24 giờ)<input id="slot-start" type="time" lang="vi-VN" step="60" required></label><label>Giờ kết thúc (24 giờ)<input id="slot-end" type="time" lang="vi-VN" step="60" required></label></div><p class="schedule-note">Nhập theo dạng HH:mm, ví dụ 08:00 hoặc 18:30.</p><div class="dialog-actions"><button class="btn btn-outline delete-slot" id="delete-slot" type="button" hidden><i class='bx bx-trash'></i> Xóa buổi</button><button class="btn btn-outline" type="button" id="close-dialog">Hủy</button><button class="btn btn-primary" type="submit"><i class='bx bx-save'></i> Lưu thời gian</button></div></form></dialog>
 <style>#class-dialog{width:min(620px,calc(100vw - 28px))}#class-dialog label{display:grid;gap:7px;font-weight:700}#class-dialog input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]),#class-dialog select,#class-dialog textarea{width:100%;box-sizing:border-box;background:var(--input-bg,#101c31)!important;color:var(--text-main)!important;border:1px solid var(--border-color)!important;border-radius:10px!important;font:inherit}#class-dialog input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]),#class-dialog select{min-height:48px;padding:11px 14px}#class-dialog textarea{min-height:78px;padding:11px 14px;resize:vertical}#class-dialog input:focus,#class-dialog select:focus,#class-dialog textarea:focus{outline:none;border-color:var(--primary)!important;box-shadow:0 0 0 3px rgba(var(--primary-rgb),.16)}</style>
 <style>.class-pause{padding:4px 7px;border:1px solid #f5b642;border-radius:7px;background:transparent;color:#ffd166;cursor:pointer;line-height:1}.class-pause:hover{background:rgba(245,182,66,.16)}.paused-list{display:grid;gap:9px;min-width:340px}.paused-item{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px;border:1px solid var(--border-color);border-radius:10px}.paused-item small{display:block;color:var(--text-muted);margin-top:3px}</style>
 <dialog class="schedule-dialog" id="paused-dialog"><form method="dialog"><h2 class="dialog-title">Lịch tạm dừng</h2><p class="schedule-note">Chọn mở lại để đưa nhóm về lịch dạy đang hoạt động.</p><div class="paused-list"><?php foreach ($pausedClasses as $pausedClass): $pausedName = (string) $pausedClass['class_name']; ?><div class="paused-item"><div><strong><?php echo htmlspecialchars($pausedName); ?></strong><small><?php echo htmlspecialchars($pausedClass['teacher_name'] ?: 'Chưa phân công giáo viên'); ?></small></div><form method="post"><?php echo csrfField(); ?><input type="hidden" name="action" value="resume_class"><input type="hidden" name="class_id" value="<?php echo (int) $pausedClass['id']; ?>"><input type="hidden" name="month" value="<?php echo htmlspecialchars($month); ?>"><button class="btn btn-primary" type="submit">Mở lại</button></form></div><?php endforeach; ?><?php if (!$pausedClasses): ?><p class="schedule-note">Không có lịch nào đang tạm dừng.</p><?php endif; ?></div><div class="dialog-actions"><button class="btn btn-outline" value="cancel">Đóng</button></div></form></dialog>
@@ -942,8 +962,8 @@ document.addEventListener('click', (event) => {
   const createForm = createClassDialog.querySelector('form');
   createForm.insertAdjacentHTML('afterbegin', '<input type="hidden" name="scope" value="<?php echo $showOwnSchedule ? 'mine' : 'all'; ?>">');
   const plannedSchedule = document.createElement('fieldset');
-  plannedSchedule.innerHTML = `<legend>Lịch học dự kiến <small>(tự tạo lịch)</small></legend><label>Số buổi<input type="number" name="total_sessions" min="0" max="500" value="0"><small>Để 0 nếu chưa muốn tự tạo lịch.</small></label><div class="weekday-label">Thứ học</div><div class="weekday-options"><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="1" checked><span>Thứ 2</span></label><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="2"><span>Thứ 3</span></label><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="3" checked><span>Thứ 4</span></label><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="4"><span>Thứ 5</span></label><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="5" checked><span>Thứ 6</span></label><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="6"><span>Thứ 7</span></label><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="7"><span>Chủ nhật</span></label></div><div class="time-grid"><label>Ngày bắt đầu<input type="date" name="planned_start_date" value="<?php echo date('Y-m-d'); ?>"></label><label class="lesson-shift-select">Chọn nhanh ca dạy<select name="planned_shift"><option value="morning">🌅 Ca sáng · 08:00 – 11:00</option><option value="afternoon">☀️ Ca chiều · 14:00 – 17:00</option><option value="evening">🌙 Ca tối · 18:00 – 21:00</option><option value="custom">✏️ Giờ tùy chỉnh</option></select><small>Chọn ca để điền nhanh giờ; vẫn có thể sửa trực tiếp bên dưới.</small></label><label>Giờ bắt đầu<input type="time" name="planned_start_time" value="08:00"></label><label>Giờ kết thúc<input type="time" name="planned_end_time" value="11:00"></label></div><div class="custom-shift-form"><strong><i class='bx bx-plus-circle'></i> Tạo ca mới</strong><label>Tên ca<input type="text" maxlength="80" id="new-shift-name" placeholder="Ví dụ: Ca trưa"></label><label>Bắt đầu<input type="time" id="new-shift-start" value="12:00"></label><label>Kết thúc<input type="time" id="new-shift-end" value="13:30"></label><button type="button" class="btn btn-outline" id="save-shift-preset">Lưu ca</button></div>`;
-  plannedSchedule.querySelector('.time-grid').insertAdjacentHTML('afterend', `<label class="second-shift-toggle"><input type="checkbox" name="use_second_daily_shift" value="1" id="use-second-daily-shift"> Một ngày học 2 ca liên tiếp</label><div class="second-shift-fields" id="second-shift-fields" hidden><strong><i class='bx bx-time-five'></i> Ca thứ hai trong cùng ngày</strong><label>Chọn nhanh ca thứ hai<select name="planned_second_shift"><option value="morning">🌅 Ca sáng · 08:00 – 11:00</option><option value="afternoon" selected>☀️ Ca chiều · 14:00 – 17:00</option><option value="evening">🌙 Ca tối · 18:00 – 21:00</option><option value="custom">✏️ Giờ tùy chỉnh</option></select></label><div class="time-grid"><label>Giờ bắt đầu ca 2<input type="time" name="planned_second_start_time" value="14:00"></label><label>Giờ kết thúc ca 2<input type="time" name="planned_second_end_time" value="17:00"></label></div><small class="schedule-note">Ca thứ hai diễn ra cùng ngày, phải bắt đầu sau khi ca thứ nhất kết thúc.</small></div>`);
+  plannedSchedule.innerHTML = `<legend>Lịch học dự kiến <small>(tự tạo lịch)</small></legend><label>Số buổi<input type="number" name="total_sessions" min="0" max="500" value="0"><small>Để 0 nếu chưa muốn tự tạo lịch.</small></label><div class="weekday-label">Thứ học</div><div class="weekday-options"><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="1" checked><span>Thứ 2</span></label><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="2"><span>Thứ 3</span></label><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="3" checked><span>Thứ 4</span></label><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="4"><span>Thứ 5</span></label><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="5" checked><span>Thứ 6</span></label><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="6"><span>Thứ 7</span></label><label class="weekday-option"><input type="checkbox" name="planned_weekdays[]" value="7"><span>Chủ nhật</span></label></div><div class="time-grid"><label>Ngày bắt đầu<input type="date" name="planned_start_date" value="<?php echo date('Y-m-d'); ?>"></label><label class="lesson-shift-select">Chọn nhanh ca dạy<select name="planned_shift"><option value="custom">✏️ Giờ tùy chỉnh</option></select><small>Chọn ca để điền nhanh giờ; vẫn có thể sửa trực tiếp bên dưới.</small></label><label>Giờ bắt đầu<input type="time" name="planned_start_time" value="08:00"></label><label>Giờ kết thúc<input type="time" name="planned_end_time" value="11:00"></label></div><div class="custom-shift-form"><strong><i class='bx bx-plus-circle'></i> Tạo ca mới</strong><label>Tên ca<input type="text" maxlength="80" id="new-shift-name" placeholder="Ví dụ: Ca trưa"></label><label>Bắt đầu<input type="time" id="new-shift-start" value="12:00"></label><label>Kết thúc<input type="time" id="new-shift-end" value="13:30"></label><button type="button" class="btn btn-outline" id="save-shift-preset">Lưu ca</button></div>`;
+  plannedSchedule.querySelector('.time-grid').insertAdjacentHTML('afterend', `<label class="second-shift-toggle"><input type="checkbox" name="use_second_daily_shift" value="1" id="use-second-daily-shift"> Một ngày học 2 ca liên tiếp</label><div class="second-shift-fields" id="second-shift-fields" hidden><strong><i class='bx bx-time-five'></i> Ca thứ hai trong cùng ngày</strong><label>Chọn nhanh ca thứ hai<select name="planned_second_shift"><option value="custom">✏️ Giờ tùy chỉnh</option></select></label><div class="time-grid"><label>Giờ bắt đầu ca 2<input type="time" name="planned_second_start_time" value="14:00"></label><label>Giờ kết thúc ca 2<input type="time" name="planned_second_end_time" value="17:00"></label></div><small class="schedule-note">Ca thứ hai diễn ra cùng ngày, phải bắt đầu sau khi ca thứ nhất kết thúc.</small></div>`);
   plannedSchedule.querySelector('input[name="total_sessions"]')?.closest('label')?.querySelector('small')?.replaceChildren(document.createTextNode('Tính theo từng ca. Ví dụ: 10 buổi với 2 ca/ngày sẽ tạo 5 ngày học. Để 0 nếu chưa muốn tự tạo lịch.'));
   createForm.querySelector('.dialog-actions').before(plannedSchedule);
   // Không chọn sẵn ngày nào: người tạo lớp tự chọn đúng lịch học thực tế.
@@ -956,7 +976,7 @@ document.addEventListener('click', (event) => {
   const secondShiftToggle = plannedSchedule.querySelector('#use-second-daily-shift');
   const secondShiftFields = plannedSchedule.querySelector('#second-shift-fields');
   const plannedSecondShiftSelect = plannedSchedule.querySelector('select[name="planned_second_shift"]');
-  const customShiftPresets = <?php echo json_encode($customShiftPresets, JSON_UNESCAPED_UNICODE); ?>;
+  const scheduleTimePresets = <?php echo json_encode($scheduleTimePresets, JSON_UNESCAPED_UNICODE); ?>;
   const plannedStartInput = plannedSchedule.querySelector('input[name="planned_start_time"]');
   const plannedEndInput = plannedSchedule.querySelector('input[name="planned_end_time"]');
   const plannedSecondStartInput = plannedSchedule.querySelector('input[name="planned_second_start_time"]');
@@ -969,20 +989,30 @@ document.addEventListener('click', (event) => {
   };
   const addPresetOptionTo = (selectElement, preset, select = false) => {
     if (!selectElement) return;
+    const presetId = String(preset.id).replace(/^preset-/, '');
+    selectElement.querySelector('option[data-preset-id="' + presetId + '"]')?.remove();
     const option = document.createElement('option');
-    option.value = 'preset:' + preset.id;
-    option.textContent = '🕘 ' + preset.name + ' · ' + preset.start_time.slice(0, 5) + ' – ' + preset.end_time.slice(0, 5);
+    option.value = preset.is_default ? preset.major_shift : 'preset:' + presetId;
+    option.textContent = (preset.icon || '⏰') + ' ' + preset.name + ' · ' + preset.start_time.slice(0, 5) + ' – ' + preset.end_time.slice(0, 5);
+    option.dataset.presetId = presetId;
     option.dataset.start = preset.start_time.slice(0, 5);
     option.dataset.end = preset.end_time.slice(0, 5);
     option.dataset.majorShift = preset.major_shift || 'morning';
     selectElement.insertBefore(option, selectElement.querySelector('option[value="custom"]'));
+    [...selectElement.querySelectorAll('option:not([value="custom"])')]
+      .sort((first, second) => first.dataset.start.localeCompare(second.dataset.start)
+        || first.dataset.end.localeCompare(second.dataset.end)
+        || first.textContent.localeCompare(second.textContent, 'vi'))
+      .forEach((item) => selectElement.insertBefore(item, selectElement.querySelector('option[value="custom"]')));
     if (select) selectElement.value = option.value;
   };
   const addPresetOption = (preset, select = true) => {
     addPresetOptionTo(plannedShiftSelect, preset, select);
     addPresetOptionTo(plannedSecondShiftSelect, preset, false);
   };
-  customShiftPresets.forEach((preset) => addPresetOption(preset, false));
+  scheduleTimePresets.forEach((preset) => addPresetOption(preset, false));
+  plannedShiftSelect.value = 'morning';
+  plannedSecondShiftSelect.value = 'afternoon';
   const shiftDialog = document.createElement('dialog');
   shiftDialog.className = 'schedule-dialog shift-manager-dialog';
   shiftDialog.innerHTML = `<form method="dialog"><h2 class="dialog-title"><i class='bx bx-time-five'></i> Ca học dùng chung</h2><p class="schedule-note">Buổi sáng, chiều và tối là các vùng lớn của lịch. Ca tạo mới được dùng chung cho tất cả giáo viên và cần thuộc một buổi để được xếp đúng vị trí.</p><div class="shift-preset-list" id="shift-preset-list"></div><div class="custom-shift-form"><strong><i class='bx bx-plus-circle'></i> Tạo ca dùng chung</strong><label>Thuộc buổi<select id="modal-new-shift-major"><option value="morning">🌅 Buổi sáng</option><option value="afternoon">☀️ Buổi chiều</option><option value="evening">🌙 Buổi tối</option></select></label><label>Tên ca<input type="text" maxlength="80" id="modal-new-shift-name" placeholder="Ví dụ: Ca trưa"></label><label>Bắt đầu<input type="time" id="modal-new-shift-start" value="12:00"></label><label>Kết thúc<input type="time" id="modal-new-shift-end" value="13:30"></label><button type="button" class="btn btn-primary" id="modal-save-shift">Lưu ca</button></div><div class="dialog-actions"><button class="btn btn-outline" value="cancel">Đóng</button></div></form>`;
@@ -996,10 +1026,15 @@ document.addEventListener('click', (event) => {
     item.append(title, time);
     shiftPresetList.append(item);
   };
-  renderPreset('🌅 Ca sáng', '08:00', '11:00');
-  renderPreset('☀️ Ca chiều', '14:00', '17:00');
-  renderPreset('🌙 Ca tối', '18:00', '21:00');
-  customShiftPresets.forEach((preset) => renderPreset('🕘 ' + preset.name, preset.start_time, preset.end_time, true));
+  const renderAllPresets = () => {
+    shiftPresetList.replaceChildren();
+    scheduleTimePresets
+      .sort((first, second) => String(first.start_time).localeCompare(String(second.start_time))
+        || String(first.end_time).localeCompare(String(second.end_time))
+        || String(first.name).localeCompare(String(second.name), 'vi'))
+      .forEach((preset) => renderPreset((preset.icon || '⏰') + ' ' + preset.name, preset.start_time, preset.end_time, !preset.is_default));
+  };
+  renderAllPresets();
   const shiftManagerButton = document.createElement('button');
   shiftManagerButton.type = 'button'; shiftManagerButton.className = 'btn btn-outline';
   shiftManagerButton.innerHTML = "<i class='bx bx-time-five'></i> Ca học";
@@ -1014,7 +1049,9 @@ document.addEventListener('click', (event) => {
     try {
       const response = await jsonRequest({action: 'create_shift_preset', name, start_time: start, end_time: end, major_shift: majorShift});
       addPresetOption(response.preset);
-      renderPreset('🕘 ' + response.preset.name, response.preset.start_time, response.preset.end_time, true);
+      scheduleTimePresets.push({...response.preset, id: 'preset-' + response.preset.id, icon: '⏰', is_default: false});
+      renderAllPresets();
+      document.dispatchEvent(new CustomEvent('schedulepresetcreated', {detail: response.preset}));
       shiftDialog.querySelector('#modal-new-shift-name').value = '';
       alert('Đã lưu ca “' + name + '”.');
     } catch (error) { alert(error.message); }
@@ -1094,6 +1131,9 @@ document.addEventListener('click', (event) => {
     try {
       const preset = await jsonRequest({action: 'create_shift_preset', name, start_time: start, end_time: end});
       addPresetOption(preset.preset);
+      scheduleTimePresets.push({...preset.preset, id: 'preset-' + preset.preset.id, icon: '⏰', is_default: false});
+      renderAllPresets();
+      document.dispatchEvent(new CustomEvent('schedulepresetcreated', {detail: preset.preset}));
       plannedStartInput.value = start;
       plannedEndInput.value = end;
       document.getElementById('new-shift-name').value = '';
@@ -1248,15 +1288,27 @@ document.addEventListener('click', (event) => {
   const presetSelect = document.getElementById('slot-time-preset');
   const startInput = document.getElementById('slot-start');
   const endInput = document.getElementById('slot-end');
-  const customPresets = <?php echo json_encode($customShiftPresets, JSON_UNESCAPED_UNICODE); ?>;
-  customPresets.forEach((preset) => {
+  const timePresets = <?php echo json_encode($scheduleTimePresets, JSON_UNESCAPED_UNICODE); ?>;
+  const addTimePreset = (preset) => {
     const start = String(preset.start_time).slice(0, 5);
     const end = String(preset.end_time).slice(0, 5);
+    const presetId = String(preset.id).replace(/^preset-/, '');
+    presetSelect.querySelector('option[data-preset-id="' + presetId + '"]')?.remove();
     const option = document.createElement('option');
     option.value = start + '|' + end;
-    option.textContent = preset.name + ' · ' + start + ' – ' + end;
-    presetSelect.insertBefore(option, presetSelect.options[1] || null);
-  });
+    option.textContent = (preset.icon || '⏰') + ' ' + preset.name + ' · ' + start + ' – ' + end;
+    option.dataset.presetId = presetId;
+    option.dataset.start = start;
+    option.dataset.end = end;
+    presetSelect.insertBefore(option, presetSelect.querySelector('option[value="custom"]'));
+    [...presetSelect.querySelectorAll('option:not([value="custom"])')]
+      .sort((first, second) => first.dataset.start.localeCompare(second.dataset.start)
+        || first.dataset.end.localeCompare(second.dataset.end)
+        || first.textContent.localeCompare(second.textContent, 'vi'))
+      .forEach((item) => presetSelect.insertBefore(item, presetSelect.querySelector('option[value="custom"]')));
+  };
+  timePresets.forEach(addTimePreset);
+  document.addEventListener('schedulepresetcreated', (event) => addTimePreset(event.detail));
   const syncPreset = () => {
     const value = startInput.value + '|' + endInput.value;
     presetSelect.value = [...presetSelect.options].some((option) => option.value === value) ? value : 'custom';

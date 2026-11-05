@@ -16,10 +16,20 @@ final class SimpleXlsxWorkbook
         array $merges = [],
         array $options = []
     ): void {
-        $name = preg_replace('~[\\\\/?:*\[\]]~u', ' ', trim($name)) ?: 'Sheet';
+        $name = preg_replace('~[\\\\/?:*\[\]]~u', ' ', self::cleanText($name)) ?? '';
+        $name = trim($name, " \t\n\r\0\x0B'") ?: 'Sheet';
         $name = function_exists('mb_substr')
             ? mb_substr($name, 0, 31, 'UTF-8')
             : substr($name, 0, 31);
+        $name = rtrim($name, " '") ?: 'Sheet';
+        if (strcasecmp($name, 'History') === 0) $name = 'History_';
+        $baseName = $name;
+        $lowercase = static fn(string $value): string => function_exists('mb_strtolower') ? mb_strtolower($value, 'UTF-8') : strtolower($value);
+        $usedNames = array_map(static fn(array $sheet): string => $lowercase($sheet['name']), $this->sheets);
+        for ($suffix = 2; in_array($lowercase($name), $usedNames, true); $suffix++) {
+            $ending = ' (' . $suffix . ')';
+            $name = (function_exists('mb_substr') ? mb_substr($baseName, 0, 31 - strlen($ending), 'UTF-8') : substr($baseName, 0, 31 - strlen($ending))) . $ending;
+        }
         $this->sheets[] = compact('name', 'rows', 'columnWidths', 'merges', 'options');
     }
 
@@ -47,10 +57,14 @@ final class SimpleXlsxWorkbook
             $zip->addFromString('xl/styles.xml', $this->stylesXml());
 
             foreach ($this->sheets as $index => $sheet) {
+                $images = $sheet['options']['images'] ?? [];
                 $zip->addFromString(
                     'xl/worksheets/sheet' . ($index + 1) . '.xml',
                     $this->worksheetXml($sheet)
                 );
+                if ($images !== []) {
+                    $this->addSheetImages($zip, $index + 1, $images);
+                }
             }
         } finally {
             $zip->close();
@@ -68,11 +82,64 @@ final class SimpleXlsxWorkbook
             . '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
             . '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
             . '<Default Extension="xml" ContentType="application/xml"/>'
+            . '<Default Extension="png" ContentType="image/png"/>'
+            . '<Default Extension="jpg" ContentType="image/jpeg"/>'
+            . '<Default Extension="gif" ContentType="image/gif"/>'
             . '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
             . '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
             . '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>'
             . '<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>'
-            . $worksheets . '</Types>';
+            . $worksheets . $this->drawingContentTypesXml() . '</Types>';
+    }
+
+    private function drawingContentTypesXml(): string
+    {
+        $xml = '';
+        foreach ($this->sheets as $index => $sheet) {
+            if (!empty($sheet['options']['images'])) {
+                $xml .= '<Override PartName="/xl/drawings/drawing' . ($index + 1)
+                    . '.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>';
+            }
+        }
+        return $xml;
+    }
+
+    /** Images are anchored to one-based row/column coordinates. */
+    private function addSheetImages(ZipArchive $zip, int $sheetId, array $images): void
+    {
+        $relationships = '';
+        $anchors = '';
+        foreach ($images as $index => $image) {
+            $id = $index + 1;
+            $path = (string) $image['path'];
+            $size = @getimagesize($path);
+            $extension = match ($size[2] ?? 0) {
+                IMAGETYPE_PNG => 'png', IMAGETYPE_JPEG => 'jpg', IMAGETYPE_GIF => 'gif',
+                default => throw new RuntimeException('Định dạng ảnh không hỗ trợ trong Excel.'),
+            };
+            $scale = min(1, 180 / $size[0], 100 / $size[1]);
+            $width = (int) round($size[0] * $scale * 9525);
+            $height = (int) round($size[1] * $scale * 9525);
+            $mediaName = 'image' . $sheetId . '_' . $id . '.' . $extension;
+            if (!$zip->addFile($path, 'xl/media/' . $mediaName)) {
+                throw new RuntimeException('Không thể thêm ảnh vào file Excel.');
+            }
+            $relationships .= '<Relationship Id="rId' . $id . '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/' . $mediaName . '"/>';
+            $anchors .= '<xdr:oneCellAnchor><xdr:from><xdr:col>' . ((int) $image['column'] - 1)
+                . '</xdr:col><xdr:colOff>47625</xdr:colOff><xdr:row>' . ((int) $image['row'] - 1)
+                . '</xdr:row><xdr:rowOff>47625</xdr:rowOff></xdr:from><xdr:ext cx="' . $width . '" cy="' . $height . '"/>'
+                . '<xdr:pic><xdr:nvPicPr><xdr:cNvPr id="' . $id . '" name="Image ' . $id . '"/><xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr>'
+                . '<xdr:blipFill><a:blip r:embed="rId' . $id . '"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill>'
+                . '<xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="' . $width . '" cy="' . $height . '"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic><xdr:clientData/></xdr:oneCellAnchor>';
+        }
+        $declaration = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+        $relationshipXml = $declaration . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
+        $zip->addFromString('xl/drawings/drawing' . $sheetId . '.xml', $declaration
+            . '<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+            . $anchors . '</xdr:wsDr>');
+        $zip->addFromString('xl/drawings/_rels/drawing' . $sheetId . '.xml.rels', $relationshipXml . $relationships . '</Relationships>');
+        $zip->addFromString('xl/worksheets/_rels/sheet' . $sheetId . '.xml.rels', $relationshipXml
+            . '<Relationship Id="rIdDrawing" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing' . $sheetId . '.xml"/></Relationships>');
     }
 
     private function rootRelationshipsXml(): string
@@ -183,21 +250,23 @@ final class SimpleXlsxWorkbook
         $paneXml = '';
         if ($freezeRows > 0 || $freezeColumns > 0) {
             $topLeft = self::columnName($freezeColumns + 1) . ($freezeRows + 1);
+            $activePane = $freezeRows > 0 ? ($freezeColumns > 0 ? 'bottomRight' : 'bottomLeft') : 'topRight';
             $paneXml = '<pane'
                 . ($freezeColumns > 0 ? ' xSplit="' . $freezeColumns . '"' : '')
                 . ($freezeRows > 0 ? ' ySplit="' . $freezeRows . '"' : '')
-                . ' topLeftCell="' . $topLeft . '" activePane="bottomRight" state="frozen"/>';
+                . ' topLeftCell="' . $topLeft . '" activePane="' . $activePane . '" state="frozen"/>';
         }
         $sheetViews = '<sheetViews><sheetView workbookViewId="0">' . $paneXml . '</sheetView></sheetViews>';
         $dimension = 'A1:' . self::columnName($maxColumn) . $maxRow;
         return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            . '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            . '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
             . '<dimension ref="' . $dimension . '"/>' . $sheetViews
             . '<sheetFormatPr defaultRowHeight="18"/><cols>' . $columnsXml . '</cols>'
             . '<sheetData>' . $rowsXml . '</sheetData>' . $mergeXml
             . '<printOptions horizontalCentered="1"/><pageMargins left="0.25" right="0.25" top="0.5" bottom="0.5" header="0.2" footer="0.2"/>'
             . '<pageSetup orientation="landscape" fitToWidth="1" fitToHeight="0" paperSize="9"/>'
             . '<headerFooter/>'
+            . (!empty($options['images']) ? '<drawing r:id="rIdDrawing"/>' : '')
             . '</worksheet>';
     }
 
