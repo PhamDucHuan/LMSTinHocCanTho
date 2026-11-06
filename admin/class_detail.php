@@ -217,6 +217,7 @@ require_once '../includes/header.php';
 ?>
 <style>
 .class-detail-head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;flex-wrap:wrap;margin-bottom:18px}.class-detail-head h1{margin:8px 0 6px}.class-detail-head p{margin:0;color:var(--text-muted)}.back-link{display:inline-flex;align-items:center;gap:6px;color:var(--primary);text-decoration:none}.detail-status{display:inline-flex;align-items:center;gap:7px;padding:8px 12px;border-radius:999px;background:rgba(30,190,130,.13);color:#54dbaa;font-weight:700}.detail-status.archived{background:rgba(255,190,60,.13);color:#ffd166}.class-detail-form{display:grid;gap:16px}.detail-card{padding:20px;border:1px solid var(--border-color);border-radius:17px;background:var(--glass-bg)}.detail-card h2{display:flex;align-items:center;gap:8px;margin:0 0 6px;font-size:20px}.detail-card>p{margin:0 0 16px;color:var(--text-muted)}.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.detail-field{display:grid;gap:7px;font-weight:700}.detail-field input,.detail-field select,.detail-field textarea,.picker-search,.exam-date-row input{box-sizing:border-box;width:100%;padding:11px 13px;border:1px solid var(--border-color);border-radius:10px;background:var(--input-bg,#101c31);color:var(--text-main);font:inherit}.detail-field textarea{min-height:92px;resize:vertical}.detail-field :disabled,.picker-search:disabled{opacity:.72;cursor:not-allowed}.picker-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px}.picker-head strong{font-size:16px}.selected-count{color:var(--primary);font-size:13px;font-weight:700}.picker-list{max-height:320px;overflow:auto;display:grid;gap:6px;padding:8px;border:1px solid var(--border-color);border-radius:12px;background:rgba(0,0,0,.08)}.picker-option{display:grid;grid-template-columns:21px minmax(0,1fr);align-items:start;gap:10px;padding:9px 10px;border-radius:9px;cursor:pointer}.picker-option:hover{background:rgba(99,102,241,.1)}.picker-option[hidden],.picker-empty[hidden],.exam-date-row[hidden]{display:none}.picker-option input{width:18px;height:18px;margin:2px 0 0;accent-color:var(--primary)}.picker-option strong,.picker-option small{display:block;overflow-wrap:anywhere}.picker-option small{margin-top:2px;color:var(--text-muted)}.picker-empty{padding:18px;text-align:center;color:var(--text-muted)}.detail-help{display:block;margin-top:8px;color:var(--text-muted);font-size:12px}.exam-date-list{display:grid;gap:8px}.exam-date-row{display:grid;grid-template-columns:minmax(0,1fr) 180px;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--border-color);border-radius:10px}.detail-actions{position:sticky;bottom:12px;z-index:4;display:flex;justify-content:flex-end;gap:10px;padding:13px;border:1px solid var(--border-color);border-radius:14px;background:color-mix(in srgb,var(--sidebar-bg) 92%,transparent);backdrop-filter:blur(12px)}.readonly-note{padding:12px 14px;border:1px solid rgba(255,193,7,.35);border-radius:12px;color:#ffd166;background:rgba(255,193,7,.08)}@media(max-width:720px){.detail-grid,.exam-date-row{grid-template-columns:1fr}.detail-card{padding:16px}.detail-actions{position:static}}
+.member-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px}.selected-list{display:grid;gap:8px}.selected-member{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 13px;border:1px solid var(--border-color);border-radius:10px}.selected-member strong,.selected-member small{display:block;overflow-wrap:anywhere}.selected-member small{color:var(--text-muted);margin-top:3px}.member-remove{border:0;background:transparent;color:var(--text-muted);cursor:pointer;font:inherit;padding:6px}.member-remove:hover{color:#ef4444}.member-picker{box-sizing:border-box;width:min(560px,calc(100% - 32px));max-height:90vh;padding:22px;border:1px solid var(--border-color);border-radius:16px;background:var(--sidebar-bg,#172033);color:var(--text-main)}.member-picker::backdrop{background:rgba(0,0,0,.65)}.member-picker h3{margin:0 0 14px}.member-picker-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}
 </style>
 
 <div class="class-detail-head">
@@ -263,7 +264,10 @@ require_once '../includes/header.php';
   <section class="detail-card">
     <h2><i class='bx bx-chalkboard'></i> Giáo viên giám sát</h2>
     <p>Giáo viên được chọn có thể xem lớp và tiến độ; không được sửa lớp hoặc nội dung khóa học.</p>
-    <div class="picker-head"><strong>Chọn giáo viên</strong><span class="selected-count" id="teacher-count"></span></div>
+    <div class="member-toolbar"><span class="selected-count" id="teacher-count"></span><?php if ($canEdit): ?><button class="btn btn-outline" type="button" id="teacher-add" aria-expanded="false" aria-controls="teacher-picker"><i class='bx bx-plus'></i> Thêm giáo viên</button><?php endif; ?></div>
+    <div class="selected-list" id="teacher-selected"></div>
+    <dialog class="member-picker" id="teacher-picker" aria-labelledby="teacher-picker-title">
+    <h3 id="teacher-picker-title">Thêm giáo viên</h3>
     <input class="picker-search" type="search" id="teacher-search" placeholder="Tìm theo tên hoặc email giáo viên" autocomplete="off">
     <div class="picker-list" id="teacher-list" style="margin-top:8px">
       <?php foreach ($teachers as $teacher): $teacherId = (int) $teacher['id']; ?>
@@ -274,12 +278,17 @@ require_once '../includes/header.php';
       <?php endforeach; ?>
       <div class="picker-empty" hidden>Không tìm thấy giáo viên phù hợp.</div>
     </div>
+    <div class="member-picker-actions"><button class="btn btn-outline" type="button" data-picker-cancel>Hủy</button><button class="btn btn-primary" type="button" data-picker-confirm>Thêm vào danh sách</button></div>
+    </dialog>
   </section>
 
   <section class="detail-card">
     <h2><i class='bx bx-user-plus'></i> Học viên của lớp</h2>
     <p>Học viên được chọn sẽ làm bài tập và trắc nghiệm của khóa học khi lớp đang hoạt động.</p>
-    <div class="picker-head"><strong>Chọn học viên</strong><span class="selected-count" id="student-count"></span></div>
+    <div class="member-toolbar"><span class="selected-count" id="student-count"></span><?php if ($canEdit): ?><button class="btn btn-outline" type="button" id="student-add" aria-expanded="false" aria-controls="student-picker"><i class='bx bx-plus'></i> Thêm học viên</button><?php endif; ?></div>
+    <div class="selected-list" id="student-selected"></div>
+    <dialog class="member-picker" id="student-picker" aria-labelledby="student-picker-title">
+    <h3 id="student-picker-title">Thêm học viên</h3>
     <input class="picker-search" type="search" id="student-search" placeholder="Tìm theo tên hoặc email học viên" autocomplete="off">
     <div class="picker-list" id="student-list" style="margin-top:8px">
       <?php foreach ($students as $student): $studentId = (int) $student['id']; ?>
@@ -290,6 +299,8 @@ require_once '../includes/header.php';
       <?php endforeach; ?>
       <div class="picker-empty" hidden>Không tìm thấy học viên phù hợp.</div>
     </div>
+    <div class="member-picker-actions"><button class="btn btn-outline" type="button" data-picker-cancel>Hủy</button><button class="btn btn-primary" type="button" data-picker-confirm>Thêm vào danh sách</button></div>
+    </dialog>
   </section>
 
   <section class="detail-card">
@@ -315,31 +326,84 @@ require_once '../includes/header.php';
 <script>
 (() => {
   const normalize = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase();
-  const setupPicker = (listId, searchId, countId) => {
-    const list = document.getElementById(listId);
-    const search = document.getElementById(searchId);
-    const count = document.getElementById(countId);
+  const setupPicker = (kind) => {
+    const list = document.getElementById(`${kind}-list`);
+    const search = document.getElementById(`${kind}-search`);
+    const count = document.getElementById(`${kind}-count`);
+    const selectedList = document.getElementById(`${kind}-selected`);
+    const picker = document.getElementById(`${kind}-picker`);
+    const add = document.getElementById(`${kind}-add`);
     const options = [...list.querySelectorAll('.picker-option')];
     const inputs = options.map(option => option.querySelector('input'));
-    const update = () => { count.textContent = `Đã chọn ${inputs.filter(input => input.checked).length}`; };
+    let originalSelection = [];
+    const update = () => {
+      const selected = options.filter(option => option.querySelector('input').checked);
+      count.textContent = `Đã chọn ${selected.length}`;
+      selectedList.replaceChildren();
+      if (!selected.length) {
+        const empty = document.createElement('div');
+        empty.className = 'picker-empty';
+        empty.textContent = kind === 'teacher' ? 'Chưa chọn giáo viên.' : 'Chưa chọn học viên.';
+        selectedList.append(empty);
+      }
+      selected.forEach(option => {
+        const input = option.querySelector('input');
+        const row = document.createElement('div');
+        row.className = 'selected-member';
+        row.append(option.querySelector('span').cloneNode(true));
+        if (!input.disabled) {
+          const remove = document.createElement('button');
+          remove.type = 'button';
+          remove.className = 'member-remove';
+          remove.textContent = 'Xóa';
+          remove.setAttribute('aria-label', `Xóa ${option.querySelector('strong').textContent}`);
+          remove.addEventListener('click', () => { input.checked = false; input.dispatchEvent(new Event('change')); });
+          row.append(remove);
+        }
+        selectedList.append(row);
+      });
+    };
     const filter = () => {
       const keyword = normalize(search.value.trim());
       let visible = 0;
       options.forEach(option => {
-        const show = !keyword || normalize(option.dataset.search).includes(keyword);
+        const input = option.querySelector('input');
+        const show = !originalSelection.includes(input) && (!keyword || normalize(option.dataset.search).includes(keyword));
         option.hidden = !show;
         if (show) visible++;
       });
       list.querySelector('.picker-empty').hidden = visible > 0;
     };
-    inputs.forEach(input => input.addEventListener('change', update));
+    inputs.forEach(input => input.addEventListener('change', () => { if (!picker.open) update(); }));
     search.addEventListener('input', filter);
+    add?.addEventListener('click', () => {
+      originalSelection = inputs.filter(input => input.checked);
+      search.value = '';
+      filter();
+      picker.showModal();
+      add.setAttribute('aria-expanded', 'true');
+      search.focus();
+    });
+    const cancel = () => {
+      inputs.forEach(input => { input.checked = originalSelection.includes(input); });
+      picker.close();
+    };
+    picker.querySelector('[data-picker-cancel]').addEventListener('click', cancel);
+    picker.addEventListener('cancel', event => { event.preventDefault(); cancel(); });
+    picker.querySelector('[data-picker-confirm]').addEventListener('click', () => {
+      picker.close();
+      inputs.forEach(input => {
+        if (input.checked !== originalSelection.includes(input)) input.dispatchEvent(new Event('change'));
+      });
+      update();
+    });
+    picker.addEventListener('close', () => add?.setAttribute('aria-expanded', 'false'));
     update();
     return inputs;
   };
 
-  setupPicker('teacher-list', 'teacher-search', 'teacher-count');
-  const studentInputs = setupPicker('student-list', 'student-search', 'student-count');
+  setupPicker('teacher');
+  const studentInputs = setupPicker('student');
   const examEmpty = document.getElementById('exam-empty');
   const updateExamDates = () => {
     let selected = 0;
@@ -352,7 +416,9 @@ require_once '../includes/header.php';
     });
     examEmpty.hidden = selected > 0;
   };
-  studentInputs.forEach(input => input.addEventListener('change', updateExamDates));
+  studentInputs.forEach(input => input.addEventListener('change', () => {
+    if (!document.getElementById('student-picker').open) updateExamDates();
+  }));
   updateExamDates();
 })();
 </script>
