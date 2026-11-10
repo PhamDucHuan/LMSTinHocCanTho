@@ -167,6 +167,10 @@ require_once '../includes/header.php';
                 </div>
             </div>
         </div>
+        <?php
+        $progressExportContext = $teacherId > 0 ? ['teacher_id' => $teacherId] : [];
+        require __DIR__ . '/../includes/teaching_progress_export_form.php';
+        ?>
         <div class="calendar-wrap table-responsive"><table class="schedule-table">
             <thead><tr><th class="info-head">LỚP / HỌC VIÊN</th><?php foreach ($days as $day): $weekend=(int)$day->format('N')>=6; $isToday=$day->format('Y-m-d')===$today; ?><th class="<?php echo trim(($weekend ? 'weekend ' : '') . ($isToday ? 'today' : '')); ?>"><small><?php echo ['T2','T3','T4','T5','T6','T7','CN'][(int)$day->format('N')-1]; ?></small><br><?php echo $day->format('d'); ?></th><?php endforeach; ?></tr></thead>
 <?php
