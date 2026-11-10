@@ -17,7 +17,8 @@ $temporaryFile = false;
 try {
     $classes = teachingProgressExportClasses($pdo, $actorId, $role, $_GET);
     $students = teachingProgressExportStudents($pdo, $classes);
-    $workbook = teachingProgressExportWorkbook($classes, $students);
+    $sessions = teachingProgressExportSessions($pdo, $classes);
+    $workbook = teachingProgressExportWorkbook($classes, $students, $sessions);
     $temporaryFile = tempnam(sys_get_temp_dir(), 'lms_teaching_progress_');
     if ($temporaryFile === false) throw new RuntimeException('Cannot create temporary XLSX.');
     $workbook->save($temporaryFile);

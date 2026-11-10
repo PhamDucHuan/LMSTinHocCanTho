@@ -5,6 +5,7 @@ require_once '../includes/security.php';
 secureSessionStart();
 require_once '../config/database.php';
 require_once '../includes/schedule_time.php';
+require_once '../includes/teaching_schedule_visibility.php';
 
 global $pdo;
 $viewerRole = (string) ($_SESSION['user_role'] ?? '');
@@ -61,6 +62,7 @@ $classes = [];
 $slots = [];
 $totalSessions = 0;
 if ($teacherId > 0) {
+    $classVisibility = teachingScheduleClassVisibilitySql($weekStart->format('Y-m-d'), $weekEnd->format('Y-m-d'));
     $classStmt = $pdo->prepare(
         "SELECT tc.id, tc.class_name, tc.notes, tc.status, tc.time_shift, tc.total_sessions, c.title AS course_title,
                 COALESCE(range_schedule.first_start_time, tc.planned_start_time,
@@ -91,22 +93,24 @@ if ($teacherId > 0) {
              GROUP BY teaching_class_id
          ) progress ON progress.teaching_class_id=tc.id
          LEFT JOIN teaching_class_students tcs ON tcs.teaching_class_id=tc.id
-         WHERE tc.status='active' AND (tc.teacher_id=? OR EXISTS (
+         " . teachingScheduleClassDatesJoinSql() . "
+         WHERE " . $classVisibility['sql'] . " AND (tc.teacher_id=? OR EXISTS (
              SELECT 1 FROM teaching_schedule_slots substitute_slot
              WHERE substitute_slot.teaching_class_id=tc.id AND substitute_slot.substitute_teacher_id=?
          ))
          GROUP BY tc.id, tc.class_name, tc.notes, tc.status, tc.time_shift, tc.total_sessions, tc.planned_start_time, tc.planned_end_time, c.title, tc.sort_order, range_schedule.first_start_time, range_schedule.first_end_time, progress.learned_sessions, progress.scheduled_sessions
          ORDER BY FIELD(display_time_shift, 'morning', 'afternoon', 'evening'), display_start_time, display_end_time, tc.sort_order, tc.id"
     );
-    $classStmt->execute([$weekStart->format('Y-m-d'), $weekEnd->format('Y-m-d'), $teacherId, $teacherId]);
+    $classStmt->execute([$weekStart->format('Y-m-d'), $weekEnd->format('Y-m-d'), ...$classVisibility['params'], $teacherId, $teacherId]);
     $classes = $classStmt->fetchAll(PDO::FETCH_ASSOC);
+    $visibleClassIds = array_map('intval', array_column($classes, 'id'));
 
     $slotStmt = $pdo->prepare(
         'SELECT ts.id, ts.teaching_class_id, ts.teaching_date, ts.start_time, ts.end_time, ts.substitute_teacher_id, replacement.name AS substitute_teacher_name
          FROM teaching_schedule_slots ts
          JOIN teaching_classes tc ON tc.id=ts.teaching_class_id
          LEFT JOIN users replacement ON replacement.id=ts.substitute_teacher_id
-         WHERE tc.status=\'active\' AND (tc.teacher_id=? OR ts.substitute_teacher_id=?) AND ts.teaching_date BETWEEN ? AND ?
+         WHERE tc.id IN (' . implode(',', $visibleClassIds ?: [0]) . ') AND (tc.teacher_id=? OR ts.substitute_teacher_id=?) AND ts.teaching_date BETWEEN ? AND ?
          ORDER BY ts.teaching_date, ts.start_time, ts.end_time, ts.teaching_class_id, ts.id'
     );
     $slotStmt->execute([$teacherId, $teacherId, $weekStart->format('Y-m-d'), $weekEnd->format('Y-m-d')]);
@@ -168,7 +172,7 @@ require_once '../includes/header.php';
             </div>
         </div>
         <?php
-        $progressExportContext = $teacherId > 0 ? ['teacher_id' => $teacherId] : [];
+        $progressExportContext = $teacherId > 0 ? ['teacher_id' => $teacherId, 'date' => $anchorDay->format('Y-m-d')] : [];
         require __DIR__ . '/../includes/teaching_progress_export_form.php';
         ?>
         <div class="calendar-wrap table-responsive"><table class="schedule-table">

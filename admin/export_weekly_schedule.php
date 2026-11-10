@@ -5,6 +5,7 @@ require_once '../includes/security.php';
 secureSessionStart();
 require_once '../config/database.php';
 require_once '../includes/schedule_time.php';
+require_once '../includes/teaching_schedule_visibility.php';
 
 global $pdo;
 
@@ -60,6 +61,7 @@ if ($teacherId !== null) {
     $teacherName = (string) $teacherNameResult;
 }
 
+$classVisibility = teachingScheduleClassVisibilitySql($rangeStart->format('Y-m-d'), $rangeEnd->format('Y-m-d'));
 $sql =
     "SELECT ts.id, ts.teaching_date, ts.start_time, ts.end_time,
             tc.id AS class_id, tc.class_name, tc.time_shift, tc.sort_order,
@@ -73,8 +75,9 @@ $sql =
      LEFT JOIN users owner ON owner.id=tc.teacher_id
      LEFT JOIN users replacement ON replacement.id=ts.substitute_teacher_id
      LEFT JOIN teaching_class_students tcs ON tcs.teaching_class_id=tc.id
-     WHERE " . ($isMonthExport ? '1=1' : "tc.status='active'") . " AND ts.teaching_date BETWEEN ? AND ?";
-$params = [$rangeStart->format('Y-m-d'), $rangeEnd->format('Y-m-d')];
+     " . teachingScheduleClassDatesJoinSql() . "
+     WHERE " . $classVisibility['sql'] . " AND ts.teaching_date BETWEEN ? AND ?";
+$params = [...$classVisibility['params'], $rangeStart->format('Y-m-d'), $rangeEnd->format('Y-m-d')];
 if ($teacherId !== null) {
     $sql .= ' AND (tc.teacher_id=? OR ts.substitute_teacher_id=?)';
     $params[] = $teacherId;
@@ -115,10 +118,11 @@ $classSql =
          GROUP BY teaching_class_id
      ) range_schedule ON range_schedule.teaching_class_id=tc.id
      LEFT JOIN teaching_class_students tcs ON tcs.teaching_class_id=tc.id
-     WHERE " . ($isMonthExport
-        ? 'EXISTS (SELECT 1 FROM teaching_schedule_slots range_slot WHERE range_slot.teaching_class_id=tc.id AND range_slot.teaching_date BETWEEN ? AND ?)'
-        : "tc.status='active'");
-$classParams = [$rangeStart->format('Y-m-d'), $rangeEnd->format('Y-m-d')];
+     " . teachingScheduleClassDatesJoinSql() . "
+     WHERE " . $classVisibility['sql'] . ($isMonthExport
+        ? ' AND EXISTS (SELECT 1 FROM teaching_schedule_slots range_slot WHERE range_slot.teaching_class_id=tc.id AND range_slot.teaching_date BETWEEN ? AND ?)'
+        : '');
+$classParams = [$rangeStart->format('Y-m-d'), $rangeEnd->format('Y-m-d'), ...$classVisibility['params']];
 if ($isMonthExport) {
     $classParams[] = $rangeStart->format('Y-m-d');
     $classParams[] = $rangeEnd->format('Y-m-d');

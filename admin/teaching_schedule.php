@@ -6,6 +6,7 @@ secureSessionStart();
 require_once '../config/database.php';
 require_once '../includes/audit.php';
 require_once '../includes/schedule_time.php';
+require_once '../includes/teaching_schedule_visibility.php';
 
 if (!in_array($_SESSION['user_role'] ?? '', ['admin', 'teacher', 'administrative_staff'], true)) {
     header('Location: ../index.php');
@@ -564,7 +565,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $pdo->prepare("UPDATE teaching_classes SET status='completed' WHERE id=?")->execute([$classId]);
             writeAuditLog($pdo, 'teaching_schedule.class_completed', 'teaching_class', $classId);
-            $_SESSION['success'] = 'Đã kết thúc lớp. Lớp sẽ được ẩn khỏi lịch mặc định.';
+            $_SESSION['success'] = 'Đã kết thúc lớp. Bạn vẫn có thể xem lại lớp trong các tuần lớp còn hoạt động.';
         }
     } elseif ($action === 'pause_class' || $action === 'resume_class') {
         $classId = (int) ($_POST['class_id'] ?? 0);
@@ -758,12 +759,16 @@ $classSql =
          GROUP BY teaching_class_id
      ) progress ON progress.teaching_class_id=tc.id
      LEFT JOIN teaching_class_students tcs ON tcs.teaching_class_id=tc.id";
+$classSql .= teachingScheduleClassDatesJoinSql();
 if (!$canManageAllSchedules) $classSql .= ' WHERE (tc.teacher_id = ' . (int) $_SESSION['user_id'] . ' OR EXISTS (SELECT 1 FROM teaching_schedule_slots own_ts WHERE own_ts.teaching_class_id=tc.id AND own_ts.substitute_teacher_id=' . (int) $_SESSION['user_id'] . '))';
 else $classSql .= ' WHERE 1=1';
-if (!$showCompleted) $classSql .= " AND tc.status='active'";
+$classVisibility = teachingScheduleClassVisibilitySql($firstDay->format('Y-m-d'), $lastDay->format('Y-m-d'), $showCompleted);
+$classSql .= ' AND ' . $classVisibility['sql'];
 $classSql .= ' GROUP BY tc.id';
 $classSql .= " ORDER BY FIELD(display_time_shift, 'morning', 'afternoon', 'evening'), display_start_time, display_end_time, tc.sort_order, tc.id";
-$classes = $pdo->query($classSql)->fetchAll();
+$classStmt = $pdo->prepare($classSql);
+$classStmt->execute($classVisibility['params']);
+$classes = $classStmt->fetchAll();
 $shiftGroups = ['morning' => [], 'afternoon' => [], 'evening' => []];
 foreach ($classes as $class) {
     $shift = $class['display_time_shift'] ?? $class['time_shift'] ?? 'morning';
@@ -821,12 +826,23 @@ require_once '../includes/header.php';
 </style>
 <style>.class-progress{display:inline-flex;align-items:center;gap:5px;margin-top:5px;padding:3px 7px;border:1px solid rgba(34,197,94,.38);border-radius:999px;background:rgba(34,197,94,.1);color:#86efac;font-size:11px;line-height:1.2}.class-progress i{font-size:14px}.class-progress strong{color:#dcfce7}.class-progress.is-complete{border-color:rgba(250,204,21,.48);background:rgba(250,204,21,.1);color:#fde68a}.class-progress.is-complete strong{color:#fef3c7}</style>
 <style>.class-head-side{display:grid;flex:0 0 auto;justify-items:end;gap:5px}.class-head-side .class-actions{justify-content:flex-end}.class-head-side .class-progress{margin-top:0;white-space:nowrap}.class-head>.class-title{min-width:0;flex:1}</style>
-<h1><i class='bx bx-calendar-event'></i> <?php echo $showOwnSchedule ? 'Lịch dạy của tôi' : 'Lịch dạy'; ?></h1>
-<p style="color:var(--text-muted);margin:-8px 0 22px">Lịch này chỉ dùng để theo dõi và sắp xếp buổi dạy, hoàn toàn độc lập với lớp học và quyền truy cập khóa học trong hệ thống.</p>
+<style>
+.teaching-page-header{display:grid;grid-template-columns:minmax(0,1fr);row-gap:18px;margin-bottom:22px}
+.teaching-page-header>h1{margin:0;line-height:1.3}
+.teaching-page-header>.schedule-page-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:0;min-height:44px}
+.teaching-page-header>.schedule-page-description{margin:0;padding-top:8px;color:var(--text-muted);line-height:1.6}
+</style>
+<div class="teaching-page-header">
+  <h1><i class='bx bx-calendar-event'></i> <?php echo $showOwnSchedule ? 'Lịch dạy của tôi' : 'Lịch dạy'; ?></h1>
+  <div class="schedule-page-actions" id="schedule-page-actions">
+    <button type="button" class="btn btn-primary" id="open-create-class"><i class='bx bx-plus-circle'></i> Tạo nhóm lịch</button>
+  </div>
+  <p class="schedule-page-description">Lịch này chỉ dùng để theo dõi và sắp xếp buổi dạy, hoàn toàn độc lập với lớp học và quyền truy cập khóa học trong hệ thống.</p>
+</div>
 <?php if (!empty($_SESSION['success'])): ?><div class="alert alert-success"><?php echo htmlspecialchars($_SESSION['success']); unset($_SESSION['success']); ?></div><?php endif; ?>
 <?php if (!empty($_SESSION['error'])): ?><div class="alert alert-error"><?php echo htmlspecialchars($_SESSION['error']); unset($_SESSION['error']); ?></div><?php endif; ?>
 <?php
-$progressExportContext = ['scope' => $showOwnSchedule ? 'mine' : 'all', 'show_completed' => $showCompleted ? '1' : '0'];
+$progressExportContext = ['scope' => $showOwnSchedule ? 'mine' : 'all', 'show_completed' => $showCompleted ? '1' : '0', 'date' => $selectedDate];
 require __DIR__ . '/../includes/teaching_progress_export_form.php';
 ?>
 <div class="schedule-layout">
@@ -848,7 +864,7 @@ require __DIR__ . '/../includes/teaching_progress_export_form.php';
 .shift-zone.shift-evening td{background:rgba(124,58,237,.04)}.shift-zone.shift-evening td.info-cell{background:color-mix(in srgb,var(--sidebar-bg) 96%,#7c3aed)}
 .shift-empty{padding:18px 14px!important;text-align:center!important;color:var(--text-muted)!important;font-style:italic;height:auto!important;background:rgba(255,255,255,.02)!important}
 @media(max-width:520px){.shift-options{grid-template-columns:1fr}}</style>
-<style>.schedule-page-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:18px 0 -4px}.create-class-dialog .custom-shift-form{display:none}.shift-manager-dialog{width:min(680px,calc(100vw - 28px))}.shift-manager-dialog form{gap:16px}.shift-preset-list{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}.shift-preset-item{display:grid;gap:4px;padding:11px;border:1px solid var(--border-color);border-radius:10px;background:rgba(255,255,255,.025)}.shift-preset-item span{color:var(--text-muted);font-size:13px}.shift-preset-item.is-custom{border-color:rgba(var(--primary-rgb),.55)}.custom-shift-form{display:grid;grid-template-columns:1.3fr 1fr 1fr auto;gap:10px;align-items:end;padding:13px;margin-top:4px;border:1px dashed rgba(var(--primary-rgb),.65);border-radius:12px;background:rgba(var(--primary-rgb),.045)}.custom-shift-form strong{grid-column:1/-1}.custom-shift-form label{display:grid;gap:6px;font-size:12px;font-weight:700}.custom-shift-form .btn{min-height:48px;white-space:nowrap}@media(max-width:640px){.shift-preset-list{grid-template-columns:1fr}.custom-shift-form{grid-template-columns:1fr 1fr}.custom-shift-form label:first-of-type{grid-column:1/-1}}@media(max-width:520px){.custom-shift-form{grid-template-columns:1fr}.custom-shift-form label:first-of-type{grid-column:auto}}</style>
+<style>.schedule-page-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:18px 0 14px}.create-class-dialog .custom-shift-form{display:none}.shift-manager-dialog{width:min(680px,calc(100vw - 28px))}.shift-manager-dialog form{gap:16px}.shift-preset-list{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}.shift-preset-item{display:grid;gap:4px;padding:11px;border:1px solid var(--border-color);border-radius:10px;background:rgba(255,255,255,.025)}.shift-preset-item span{color:var(--text-muted);font-size:13px}.shift-preset-item.is-custom{border-color:rgba(var(--primary-rgb),.55)}.custom-shift-form{display:grid;grid-template-columns:1.3fr 1fr 1fr auto;gap:10px;align-items:end;padding:13px;margin-top:4px;border:1px dashed rgba(var(--primary-rgb),.65);border-radius:12px;background:rgba(var(--primary-rgb),.045)}.custom-shift-form strong{grid-column:1/-1}.custom-shift-form label{display:grid;gap:6px;font-size:12px;font-weight:700}.custom-shift-form .btn{min-height:48px;white-space:nowrap}@media(max-width:640px){.shift-preset-list{grid-template-columns:1fr}.custom-shift-form{grid-template-columns:1fr 1fr}.custom-shift-form label:first-of-type{grid-column:1/-1}}@media(max-width:520px){.custom-shift-form{grid-template-columns:1fr}.custom-shift-form label:first-of-type{grid-column:auto}}</style>
 <style>.month-control{padding:5px 6px 5px 12px;border:1px solid var(--border-color);border-radius:12px;background:rgba(8,20,40,.55)}.month-control input[type="month"]{width:170px!important;min-height:42px;padding:8px 10px;border:1px solid transparent!important;border-radius:8px;background:transparent!important;color:var(--text-main)!important;font:700 14px inherit;cursor:pointer}.month-control input[type="month"]:focus{outline:none;border-color:var(--primary)!important;background:rgba(255,255,255,.04)!important}.month-control input[type="month"]::-webkit-calendar-picker-indicator{filter:invert(1);opacity:.9;cursor:pointer}</style>
 <style>.schedule-table{width:100%;min-width:0;table-layout:fixed;font-size:12px}.schedule-table th{padding:8px 6px}.schedule-table th.info-head,.schedule-table td.info-cell{width:240px;min-width:240px;max-width:240px}.schedule-table td{min-width:0;height:48px;padding:4px}.schedule-table td.info-cell{padding:7px 10px}.class-meta{margin-top:2px;line-height:1.3;word-break:normal;overflow-wrap:normal}.class-meta.class-students,.info-cell>.class-meta:last-of-type{white-space:pre-line}.slot{padding:4px 6px;margin:1px 0;font-size:11px}.add-slot{display:block;width:100%;min-height:20px;margin-top:2px;padding:0;border:1px dashed transparent;border-radius:6px;background:transparent;color:var(--text-muted);font:700 15px/1 inherit;cursor:pointer;opacity:.35}.schedule-cell:hover .add-slot,.add-slot:focus-visible{border-color:rgba(var(--primary-rgb),.6);color:var(--primary);opacity:1}@media(max-width:900px){.schedule-table{width:940px;min-width:940px}.schedule-table th.info-head,.schedule-table td.info-cell{width:210px;min-width:210px;max-width:210px}}</style>
 <script>
@@ -954,14 +970,9 @@ document.addEventListener('click', (event) => {
 (() => {
   const token = <?php echo json_encode(csrfToken()); ?>;
   const createClassDialog = document.getElementById('create-class-dialog');
-  const createClassButton = document.createElement('button');
-  createClassButton.type = 'button'; createClassButton.className = 'btn btn-primary';
-  createClassButton.innerHTML = "<i class='bx bx-plus-circle'></i> Tạo nhóm lịch";
+  const createClassButton = document.getElementById('open-create-class');
   createClassButton.addEventListener('click', () => createClassDialog.showModal());
-  const scheduleActions = document.createElement('div');
-  scheduleActions.className = 'schedule-page-actions';
-  scheduleActions.append(createClassButton);
-  document.querySelector('h1')?.after(scheduleActions);
+  const scheduleActions = document.getElementById('schedule-page-actions');
   document.getElementById('close-create-class')?.addEventListener('click', () => createClassDialog.close());
   const createForm = createClassDialog.querySelector('form');
   createForm.insertAdjacentHTML('afterbegin', '<input type="hidden" name="scope" value="<?php echo $showOwnSchedule ? 'mine' : 'all'; ?>">');
@@ -1206,7 +1217,7 @@ document.addEventListener('click', (event) => {
     head.querySelector('form')?.remove();
     const actions = document.createElement('div');
     actions.className = 'class-actions';
-    actions.innerHTML = `<button type="button" class="class-edit" title="Sửa lớp"><i class='bx bx-edit'></i></button><form method="post" onsubmit="return confirm('Kết thúc lớp này? Lớp sẽ được ẩn khỏi lịch mặc định.');"><input type="hidden" name="csrf_token" value="${token}"><input type="hidden" name="action" value="complete_class"><input type="hidden" name="class_id" value="${classId}"><input type="hidden" name="month" value="<?php echo htmlspecialchars($month, ENT_QUOTES); ?>"><button type="submit" class="class-complete" title="Kết thúc lớp"><i class='bx bx-check'></i></button></form><form method="post" onsubmit="return confirm('Xóa lớp này và toàn bộ lịch dạy của lớp?');"><input type="hidden" name="csrf_token" value="${token}"><input type="hidden" name="action" value="delete_class"><input type="hidden" name="class_id" value="${classId}"><input type="hidden" name="month" value="<?php echo htmlspecialchars($month, ENT_QUOTES); ?>"><button type="submit" class="class-delete" title="Xóa lớp"><i class='bx bx-trash'></i></button></form>`;
+    actions.innerHTML = `<button type="button" class="class-edit" title="Sửa lớp"><i class='bx bx-edit'></i></button><form method="post" onsubmit="return confirm('Kết thúc lớp này? Bạn vẫn có thể xem lại lớp ở các tuần còn hoạt động.');"><input type="hidden" name="csrf_token" value="${token}"><input type="hidden" name="action" value="complete_class"><input type="hidden" name="class_id" value="${classId}"><input type="hidden" name="month" value="<?php echo htmlspecialchars($month, ENT_QUOTES); ?>"><button type="submit" class="class-complete" title="Kết thúc lớp"><i class='bx bx-check'></i></button></form><form method="post" onsubmit="return confirm('Xóa lớp này và toàn bộ lịch dạy của lớp?');"><input type="hidden" name="csrf_token" value="${token}"><input type="hidden" name="action" value="delete_class"><input type="hidden" name="class_id" value="${classId}"><input type="hidden" name="month" value="<?php echo htmlspecialchars($month, ENT_QUOTES); ?>"><button type="submit" class="class-delete" title="Xóa lớp"><i class='bx bx-trash'></i></button></form>`;
     const pauseForm = document.createElement('form');
     pauseForm.method = 'post';
     pauseForm.innerHTML = `<input type="hidden" name="csrf_token" value="${token}"><input type="hidden" name="action" value="pause_class"><input type="hidden" name="class_id" value="${classId}"><input type="hidden" name="month" value="<?php echo htmlspecialchars($month, ENT_QUOTES); ?>"><button type="submit" class="class-pause" title="Tạm dừng lớp"><i class='bx bx-pause'></i></button>`;
@@ -1261,7 +1272,7 @@ document.addEventListener('click', (event) => {
         };
         statusActions.innerHTML = `<button type="button" class="btn btn-outline" id="pause-edit-class"><i class='bx bx-pause'></i> Tạm dừng lớp</button><button type="button" class="btn btn-outline" id="complete-edit-class"><i class='bx bx-check'></i> Kết thúc lớp</button><button type="button" class="btn btn-outline" id="delete-edit-class"><i class='bx bx-trash'></i> Xóa lớp</button>`;
         document.getElementById('pause-edit-class').addEventListener('click', () => submitClassAction('pause_class', 'Tạm dừng lớp này? Lớp sẽ được ẩn khỏi lịch mặc định.'));
-        document.getElementById('complete-edit-class').addEventListener('click', () => submitClassAction('complete_class', 'Kết thúc lớp này? Lớp sẽ được ẩn khỏi lịch mặc định.'));
+        document.getElementById('complete-edit-class').addEventListener('click', () => submitClassAction('complete_class', 'Kết thúc lớp này? Bạn vẫn có thể xem lại lớp ở các tuần còn hoạt động.'));
         document.getElementById('delete-edit-class').addEventListener('click', () => submitClassAction('delete_class', 'Xóa lớp này và toàn bộ lịch dạy của lớp?'));
         classDialog.showModal();
       } catch (error) { alert(error.message); }

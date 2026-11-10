@@ -27,7 +27,7 @@ $progressExportContext = $progressExportContext ?? [];
         <?php foreach ($progressExportContext as $key => $value): ?>
             <input type="hidden" name="<?php echo htmlspecialchars((string) $key, ENT_QUOTES, 'UTF-8'); ?>" value="<?php echo htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8'); ?>">
         <?php endforeach; ?>
-        <p class="export-note">Xuất toàn bộ quá trình học của các lớp trong danh sách lịch hiện tại, gồm điểm danh từng học viên và buổi bù. File có trang tổng hợp và trang riêng cho mỗi lớp.</p>
+        <p class="export-note">File có trang tổng hợp và trang riêng từng lớp. Mỗi học viên một dòng, ngày Có học xếp ngang theo B1, B2… (gồm học bù), cuối dòng là tổng số buổi đã học / tổng buổi.</p>
         <div class="export-controls">
             <label class="export-field">Phạm vi xuất
                 <select name="mode">

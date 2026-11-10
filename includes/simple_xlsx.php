@@ -272,12 +272,13 @@ final class SimpleXlsxWorkbook
 
     /** Style IDs: 0 normal, 1 title, 2 subtitle, 3 section, 4 header, 5 body,
      * 6 number, 7 date group, 8 matrix header, 9 weekend, 10 class,
-     * 11 occupied cell, 12 empty cell, 13/14/15 shift headers. */
+     * 11 occupied cell, 12 empty cell, 13/14/15 shift headers,
+     * 16 attended date, 17 progress total, 18 student name, 19 wrapped note. */
     private function stylesXml(): string
     {
         return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             . '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-            . '<fonts count="7">'
+            . '<fonts count="9">'
             . '<font><sz val="10"/><name val="Arial"/></font>'
             . '<font><b/><sz val="16"/><color rgb="FFFFFFFF"/><name val="Arial"/></font>'
             . '<font><i/><sz val="10"/><color rgb="FF475569"/><name val="Arial"/></font>'
@@ -285,16 +286,18 @@ final class SimpleXlsxWorkbook
             . '<font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Arial"/></font>'
             . '<font><b/><sz val="10"/><color rgb="FF0F172A"/><name val="Arial"/></font>'
             . '<font><b/><sz val="9"/><color rgb="FF12352A"/><name val="Arial"/></font>'
+            . '<font><sz val="10"/><color rgb="FF0066FF"/><name val="Arial"/></font>'
+            . '<font><b/><sz val="10"/><color rgb="FF0066FF"/><name val="Arial"/></font>'
             . '</fonts>'
-            . '<fills count="13"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>'
+            . '<fills count="14"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>'
             . self::fill('1F517E') . self::fill('334155') . self::fill('2563EB') . self::fill('D1FAE5')
             . self::fill('245986') . self::fill('3D3D3D') . self::fill('E8F1F8') . self::fill('EAF7F1')
-            . self::fill('F8FAFC') . self::fill('EA580C') . self::fill('7C3AED') . '</fills>'
+            . self::fill('F8FAFC') . self::fill('EA580C') . self::fill('7C3AED') . self::fill('E7F0FF') . '</fills>'
             . '<borders count="4"><border/><border><left style="thin"><color rgb="FFCBD5E1"/></left><right style="thin"><color rgb="FFCBD5E1"/></right><top style="thin"><color rgb="FFCBD5E1"/></top><bottom style="thin"><color rgb="FFCBD5E1"/></bottom></border>'
             . '<border><left style="thin"><color rgb="FF8BA9C1"/></left><right style="thin"><color rgb="FF8BA9C1"/></right><top style="thin"><color rgb="FF8BA9C1"/></top><bottom style="thin"><color rgb="FF8BA9C1"/></bottom></border>'
             . '<border><top style="thin"><color rgb="FF6EE7B7"/></top><bottom style="thin"><color rgb="FF6EE7B7"/></bottom></border></borders>'
             . '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-            . '<cellXfs count="16">'
+            . '<cellXfs count="20">'
             . self::xf(0, 0, 0, 'vertical="center"')
             . self::xf(1, 2, 0, 'horizontal="center" vertical="center"')
             . self::xf(2, 0, 0, 'vertical="center"')
@@ -311,6 +314,10 @@ final class SimpleXlsxWorkbook
             . self::xf(3, 4, 0, 'vertical="center"')
             . self::xf(3, 11, 0, 'vertical="center"')
             . self::xf(3, 12, 0, 'vertical="center"')
+            . self::xf(7, 13, 1, 'horizontal="center" vertical="center"')
+            . self::xf(8, 0, 1, 'horizontal="center" vertical="center"')
+            . self::xf(5, 10, 1, 'vertical="center" wrapText="1"')
+            . self::xf(2, 0, 0, 'vertical="center" wrapText="1"')
             . '</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
             . '</styleSheet>';
     }
