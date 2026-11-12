@@ -845,6 +845,28 @@ require_once '../includes/header.php';
 $progressExportContext = ['scope' => $showOwnSchedule ? 'mine' : 'all', 'show_completed' => $showCompleted ? '1' : '0', 'date' => $selectedDate];
 require __DIR__ . '/../includes/teaching_progress_export_form.php';
 ?>
+<style>
+#complete-class-dialog{width:min(520px,calc(100vw - 28px));max-height:calc(100dvh - 28px);margin:auto;overflow:auto}
+#complete-class-dialog .dialog-title{display:flex;align-items:center;gap:10px}
+#complete-class-dialog .dialog-title i{color:var(--success,#22c55e);font-size:28px}
+#complete-class-dialog .dialog-actions .btn{min-height:44px}
+#complete-class-dialog .btn:disabled{opacity:.6;cursor:wait}
+</style>
+<dialog class="schedule-dialog" id="complete-class-dialog" aria-labelledby="complete-class-title" aria-describedby="complete-class-description">
+  <form method="post" id="complete-class-form">
+    <?php echo csrfField(); ?>
+    <input type="hidden" name="action" value="complete_class">
+    <input type="hidden" name="class_id" id="complete-class-id">
+    <input type="hidden" name="date" value="<?php echo htmlspecialchars($selectedDate, ENT_QUOTES); ?>">
+    <input type="hidden" name="scope" value="<?php echo $showOwnSchedule ? 'mine' : 'all'; ?>">
+    <h2 class="dialog-title" id="complete-class-title"><i class='bx bx-check-circle'></i> Kết thúc lớp học?</h2>
+    <p id="complete-class-description" style="margin:0;line-height:1.6">Bạn muốn kết thúc lớp <strong id="complete-class-name" style="overflow-wrap:anywhere"></strong>? Bạn vẫn có thể xem lại lịch dạy của lớp trong các tuần còn hoạt động.</p>
+    <div class="dialog-actions">
+      <button type="button" class="btn btn-outline" id="cancel-complete-class" autofocus>Hủy</button>
+      <button type="submit" class="btn btn-primary" id="confirm-complete-class"><i class='bx bx-check'></i> Kết thúc lớp</button>
+    </div>
+  </form>
+</dialog>
 <div class="schedule-layout">
   <section class="schedule-card"><div class="month-bar"><div><h2 style="margin:0"><i class='bx bx-table'></i> Lịch dạy tháng <?php echo $firstDay->format('m/Y'); ?></h2><p class="schedule-note" style="margin-top:6px">Giờ hiển thị theo định dạng 24 giờ. Các nhóm lịch và buổi học tự xếp theo giờ bắt đầu → giờ kết thúc.</p></div><form class="month-control" method="get"><input type="month" name="month" value="<?php echo htmlspecialchars($month); ?>"><button class="btn btn-outline">Xem lịch</button></form></div><div class="calendar-wrap"><table class="schedule-table"><thead><tr><th class="info-head">NHÓM LỊCH / HỌC VIÊN</th><?php foreach ($days as $day): $weekend=(int)$day->format('N')>=6; $isToday=$day->format('Y-m-d')===$todayDate; ?><th class="<?php echo trim(($weekend ? 'weekend ' : '') . ($isToday ? 'today' : '')); ?>"><small><?php echo ['T2','T3','T4','T5','T6','T7','CN'][(int)$day->format('N')-1]; ?></small><br><?php echo $day->format('d'); ?></th><?php endforeach; ?></tr></thead><tbody><?php foreach ($shiftGroups as $shiftKey => $shiftClasses): ?><tr class="shift-header shift-<?php echo $shiftKey; ?>"><td colspan="<?php echo count($days)+1; ?>" class="shift-label" style="--shift-color:<?php echo $shiftColors[$shiftKey]; ?>"><?php echo $shiftLabels[$shiftKey]; ?></td></tr><?php if (empty($shiftClasses)): ?><tr class="shift-zone shift-<?php echo $shiftKey; ?>"><td colspan="<?php echo count($days)+1; ?>" class="shift-empty">Chưa có lịch nào trong ca này</td></tr><?php endif; ?><?php foreach ($shiftClasses as $class): $displayName = (string) $class['class_name']; $learnedSessions = (int) $class['learned_sessions']; $totalClassSessions = (int) $class['total_sessions'] > 0 ? (int) $class['total_sessions'] : (int) $class['scheduled_sessions']; ?><tr class="shift-zone shift-<?php echo $shiftKey; ?>"><td class="info-cell"><div class="class-head"><div class="class-title"><?php echo htmlspecialchars($displayName); ?></div></div><div class="class-meta"><?php echo htmlspecialchars($class['teacher_name'] ?: 'Chưa phân công giáo viên'); ?> · <?php echo (int)$class['student_count']; ?> học viên</div><div class="class-progress <?php echo $totalClassSessions > 0 && $learnedSessions >= $totalClassSessions ? 'is-complete' : ''; ?>" data-progress-class-id="<?php echo (int)$class['id']; ?>" data-learned="<?php echo $learnedSessions; ?>" data-total="<?php echo $totalClassSessions; ?>" title="Số ca đã điểm danh Có học"><i class='bx bx-check-circle'></i><strong class="class-progress-value"><?php echo $learnedSessions; ?>/<?php echo $totalClassSessions; ?> buổi</strong></div><div class="class-meta"><?php echo htmlspecialchars($class['students'] ?: 'Chưa nhập học viên'); ?></div></td><?php foreach ($days as $day): $date=$day->format('Y-m-d'); $cellSlots=$slots[(int)$class['id']][$date]??[]; $weekend=(int)$day->format('N')>=6; ?><td class="schedule-cell <?php echo $weekend ? 'weekend' : ''; ?>" data-class-id="<?php echo (int)$class['id']; ?>" data-class-name="<?php echo htmlspecialchars($displayName, ENT_QUOTES); ?>" data-date="<?php echo $date; ?>"><?php foreach ($cellSlots as $slot): $slotStart=scheduleTime24($slot['start_time']); $slotEnd=scheduleTime24($slot['end_time']); ?><button type="button" class="slot" data-slot-id="<?php echo (int)$slot['id']; ?>" data-start="<?php echo $slotStart; ?>" data-end="<?php echo $slotEnd; ?>"><?php echo scheduleTimeRange24($slotStart, $slotEnd); ?></button><?php endforeach; ?><button type="button" class="add-slot" aria-label="Thêm ca dạy trong ô" title="Thêm ca dạy trong ô">+</button></td><?php endforeach; ?></tr><?php endforeach; ?><?php endforeach; ?><?php if (!$classes): ?><tr><td colspan="<?php echo count($days)+1; ?>" style="padding:34px;text-align:center;color:var(--text-muted)">Chưa có lịch nào. Hãy tạo nhóm lịch đầu tiên bằng nút "Tạo lịch mới".</td></tr><?php endif; ?></tbody></table></div></section>
 </div>
@@ -1203,6 +1225,24 @@ document.addEventListener('click', (event) => {
     }
   });
   setScheduleInputsEnabled(false);
+  const completionDialog = document.getElementById('complete-class-dialog');
+  const completionForm = document.getElementById('complete-class-form');
+  const completionButton = document.getElementById('confirm-complete-class');
+  const openCompletionDialog = (classId, className) => {
+    document.getElementById('complete-class-id').value = classId;
+    document.getElementById('complete-class-name').textContent = className || 'đã chọn';
+    completionButton.disabled = false;
+    if (!completionDialog.open) completionDialog.showModal();
+  };
+  document.getElementById('cancel-complete-class').addEventListener('click', () => completionDialog.close());
+  completionForm.addEventListener('submit', () => { completionButton.disabled = true; });
+  completionDialog.addEventListener('close', () => { completionButton.disabled = false; });
+  document.addEventListener('submit', (event) => {
+    const form = event.target;
+    if (!(form instanceof HTMLFormElement) || form === completionForm || form.elements.namedItem('action')?.value !== 'complete_class') return;
+    event.preventDefault();
+    openCompletionDialog(form.elements.namedItem('class_id')?.value, form.closest('.info-cell')?.querySelector('.class-title')?.textContent);
+  });
   const jsonRequest = async (body) => {
     const response = await fetch(location.href, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({...body, csrf_token: token})});
     const data = await response.json();
@@ -1217,7 +1257,7 @@ document.addEventListener('click', (event) => {
     head.querySelector('form')?.remove();
     const actions = document.createElement('div');
     actions.className = 'class-actions';
-    actions.innerHTML = `<button type="button" class="class-edit" title="Sửa lớp"><i class='bx bx-edit'></i></button><form method="post" onsubmit="return confirm('Kết thúc lớp này? Bạn vẫn có thể xem lại lớp ở các tuần còn hoạt động.');"><input type="hidden" name="csrf_token" value="${token}"><input type="hidden" name="action" value="complete_class"><input type="hidden" name="class_id" value="${classId}"><input type="hidden" name="month" value="<?php echo htmlspecialchars($month, ENT_QUOTES); ?>"><button type="submit" class="class-complete" title="Kết thúc lớp"><i class='bx bx-check'></i></button></form><form method="post" onsubmit="return confirm('Xóa lớp này và toàn bộ lịch dạy của lớp?');"><input type="hidden" name="csrf_token" value="${token}"><input type="hidden" name="action" value="delete_class"><input type="hidden" name="class_id" value="${classId}"><input type="hidden" name="month" value="<?php echo htmlspecialchars($month, ENT_QUOTES); ?>"><button type="submit" class="class-delete" title="Xóa lớp"><i class='bx bx-trash'></i></button></form>`;
+    actions.innerHTML = `<button type="button" class="class-edit" title="Sửa lớp"><i class='bx bx-edit'></i></button><form method="post"><input type="hidden" name="csrf_token" value="${token}"><input type="hidden" name="action" value="complete_class"><input type="hidden" name="class_id" value="${classId}"><input type="hidden" name="month" value="<?php echo htmlspecialchars($month, ENT_QUOTES); ?>"><button type="submit" class="class-complete" title="Kết thúc lớp"><i class='bx bx-check'></i></button></form><form method="post" onsubmit="return confirm('Xóa lớp này và toàn bộ lịch dạy của lớp?');"><input type="hidden" name="csrf_token" value="${token}"><input type="hidden" name="action" value="delete_class"><input type="hidden" name="class_id" value="${classId}"><input type="hidden" name="month" value="<?php echo htmlspecialchars($month, ENT_QUOTES); ?>"><button type="submit" class="class-delete" title="Xóa lớp"><i class='bx bx-trash'></i></button></form>`;
     const pauseForm = document.createElement('form');
     pauseForm.method = 'post';
     pauseForm.innerHTML = `<input type="hidden" name="csrf_token" value="${token}"><input type="hidden" name="action" value="pause_class"><input type="hidden" name="class_id" value="${classId}"><input type="hidden" name="month" value="<?php echo htmlspecialchars($month, ENT_QUOTES); ?>"><button type="submit" class="class-pause" title="Tạm dừng lớp"><i class='bx bx-pause'></i></button>`;
@@ -1272,7 +1312,7 @@ document.addEventListener('click', (event) => {
         };
         statusActions.innerHTML = `<button type="button" class="btn btn-outline" id="pause-edit-class"><i class='bx bx-pause'></i> Tạm dừng lớp</button><button type="button" class="btn btn-outline" id="complete-edit-class"><i class='bx bx-check'></i> Kết thúc lớp</button><button type="button" class="btn btn-outline" id="delete-edit-class"><i class='bx bx-trash'></i> Xóa lớp</button>`;
         document.getElementById('pause-edit-class').addEventListener('click', () => submitClassAction('pause_class', 'Tạm dừng lớp này? Lớp sẽ được ẩn khỏi lịch mặc định.'));
-        document.getElementById('complete-edit-class').addEventListener('click', () => submitClassAction('complete_class', 'Kết thúc lớp này? Bạn vẫn có thể xem lại lớp ở các tuần còn hoạt động.'));
+        document.getElementById('complete-edit-class').addEventListener('click', () => openCompletionDialog(classData.id, classData.class_name));
         document.getElementById('delete-edit-class').addEventListener('click', () => submitClassAction('delete_class', 'Xóa lớp này và toàn bộ lịch dạy của lớp?'));
         classDialog.showModal();
       } catch (error) { alert(error.message); }
